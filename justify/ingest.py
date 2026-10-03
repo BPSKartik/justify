@@ -38,11 +38,26 @@ def is_skipped(rel_parts: tuple[str, ...]) -> bool:
     return any(part in SKIP_DIRS or part.endswith(".egg-info") for part in rel_parts)
 
 
+def inside(root: pathlib.Path, path: pathlib.Path) -> bool:
+    """True for a real file under root reached without any symlink. A repository can hold a
+    link to /etc/passwd or to a secrets file next to it; following it would read — and echo in
+    findings — something that is not the repository's code."""
+    p = root
+    for part in path.relative_to(root).parts:
+        p = p / part
+        if p.is_symlink():
+            return False
+    try:
+        return path.is_file() and path.resolve().is_relative_to(root.resolve())
+    except OSError:
+        return False
+
+
 def ingest(root: pathlib.Path) -> list[SourceFile]:
     files: list[SourceFile] = []
     for path in sorted(root.rglob("*.py")):
         rel_parts = path.relative_to(root).parts
-        if is_skipped(rel_parts) or not path.is_file():
+        if is_skipped(rel_parts) or not inside(root, path):
             continue
         raw = path.read_bytes()
         try:   # a BOM or a coding cookie decides the encoding, the way Python itself reads the file
@@ -55,8 +70,9 @@ def ingest(root: pathlib.Path) -> list[SourceFile]:
                         source_lines=text.split("\n"))
         try:
             sf.tree = ast.parse(text, filename=str(path))
-        except (SyntaxError, ValueError) as exc:
-            sf.error = f"{exc.__class__.__name__}: {exc}"
+        except (SyntaxError, ValueError, RecursionError, MemoryError) as exc:
+            sf.error = f"{exc.__class__.__name__}: {str(exc)[:200]}"
+            sf.tree = None
         files.append(sf)
     return files
 
@@ -77,7 +93,7 @@ def other_files(root: pathlib.Path) -> list[tuple[str, str]]:
         if path.suffix in (".py",) or path.suffix.lower() in BINARY_SUFFIXES or is_skipped(rel_parts):
             continue
         try:
-            if not path.is_file() or path.stat().st_size > 512_000:
+            if not inside(root, path) or path.stat().st_size > 512_000:
                 continue
             raw = path.read_bytes()
         except OSError:

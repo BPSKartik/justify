@@ -311,7 +311,10 @@ def _requirements(rf: RepoFacts) -> list[tuple[str, str, int]]:
     """(distribution, file, line) from requirements*.txt and pyproject dependencies."""
     deps = []
     root = rf.root
+    from .ingest import inside
     for path in sorted(list(root.glob("requirements*.txt")) + list(root.glob("requirements/*.txt"))):
+        if not inside(root, path):
+            continue
         for i, raw in enumerate(path.read_text(encoding="utf-8", errors="replace").split("\n"), 1):
             line = raw.split("#")[0].strip()
             if not line or line.startswith(("-", "git+", "http")):
@@ -320,7 +323,7 @@ def _requirements(rf: RepoFacts) -> list[tuple[str, str, int]]:
             if name:
                 deps.append((name, str(path.relative_to(root)), i))
     pp = root / "pyproject.toml"
-    if pp.exists():
+    if pp.exists() and inside(root, pp):
         text = pp.read_text(encoding="utf-8", errors="replace")
         m = re.search(r"^dependencies\s*=\s*\[(.*?)\]", text, re.S | re.M)
         if m:

@@ -7,7 +7,7 @@ import json
 import pathlib
 import sys
 
-from . import NAME, TAGLINE
+from . import NAME, TAGLINE, __version__
 from .model import REMOVE, SIMPLIFY
 
 
@@ -53,6 +53,8 @@ def _print_summary(res) -> None:
               f"human {a['human_lines']:,} lines")
         print(f"  Dead weight / 1,000   AI-assisted {a['ai_dead_per_1000']}   ·   human {a['human_dead_per_1000']}"
               + (f"   ·   ratio {a['ai_to_human_ratio']}×" if a["ai_to_human_ratio"] is not None else ""))
+        if a.get("ai_dup_per_1000") is not None or a.get("human_dup_per_1000") is not None:
+            print(f"  Duplicates / 1,000    AI-assisted {a.get('ai_dup_per_1000')}   ·   human {a.get('human_dup_per_1000')}")
         rw = a.get("rework")
         if rw and rw["ai"]["rewritten_percent"] is not None:
             human = rw["human"]["rewritten_percent"]
@@ -66,6 +68,7 @@ def _print_summary(res) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="justify", description=f"{NAME} — {TAGLINE}")
+    ap.add_argument("--version", action="version", version=f"justify {__version__}")
     sub = ap.add_subparsers(dest="cmd")
 
     s = sub.add_parser("scan", help="scan a repository")
@@ -77,6 +80,8 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--report", type=pathlib.Path, help="write a markdown pull-request report here")
     s.add_argument("--dashboard", type=pathlib.Path, help="write an HTML dashboard here")
     s.add_argument("--no-record", action="store_true", help="do not write this run to the ledger")
+    s.add_argument("--progress", action="store_true",
+                   help="write one JSON line per finished stage to stderr; stdout is unchanged")
 
     h = sub.add_parser("history", help="show the ledger for a repository")
     h.add_argument("path", type=pathlib.Path)
@@ -86,12 +91,29 @@ def main(argv: list[str] | None = None) -> int:
     m.add_argument("--host", default="127.0.0.1")
     m.add_argument("--port", type=int, default=8765)
 
+    v = sub.add_parser("serve", help="run the hosted service: web page, JSON API and public MCP endpoint")
+    v.add_argument("--host", default="127.0.0.1")
+    v.add_argument("--port", type=int, default=8000)
+
     args = ap.parse_args(argv)
     sys.stdout.reconfigure(line_buffering=True)
 
     if args.cmd == "mcp":
-        from .mcp_server import main as mcp_main
+        try:
+            from .mcp_server import main as mcp_main
+        except ImportError:
+            print('The MCP server needs the mcp extra:  pip install "justify-code[mcp]"', file=sys.stderr)
+            return 2
         mcp_main(http=args.http, host=args.host, port=args.port)
+        return 0
+
+    if args.cmd == "serve":
+        try:
+            from .hosted.app import main as serve_main
+        except ImportError:
+            print('The hosted service needs the hosted extra:  pip install "justify-code[hosted]"', file=sys.stderr)
+            return 2
+        serve_main(host=args.host, port=args.port)
         return 0
 
     if args.cmd == "history":
@@ -118,9 +140,17 @@ def main(argv: list[str] | None = None) -> int:
             print("  --judge: no model configured (see justify/llm.py); continuing without stages 4-5")
     if model is not None and not args.json:
         print(f"  Stages 4-5 ask {model.name} about each undecided unit — a few seconds each", file=sys.stderr)
-    res = run(args.path, model=model, prove_command=args.prove, record=not args.no_record,
-              judge_limit=args.judge_limit,
-              progress=None if args.json else (lambda msg: print(f"  {msg}", file=sys.stderr, flush=True)))
+    def on_stage(name, message, **numbers):
+        print(json.dumps({"stage": name, "message": message, **numbers}), file=sys.stderr, flush=True)
+
+    try:
+        res = run(args.path, model=model, prove_command=args.prove, record=not args.no_record,
+                  judge_limit=args.judge_limit,
+                  progress=None if args.json else (lambda msg: print(f"  {msg}", file=sys.stderr, flush=True)),
+                  on_stage=on_stage if args.progress else None)
+    except ValueError as exc:
+        print(f"justify: {exc}", file=sys.stderr)
+        return 2
 
     if args.report:
         from .report import markdown

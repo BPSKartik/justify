@@ -23,14 +23,18 @@ Repository = "https://github.com/BPSKartik/justify"
 
 [project.optional-dependencies]
 mcp = ["mcp>=2,<3"]
-dev = ["pytest>=8"]
+hosted = ["mcp>=2,<3", "uvicorn>=0.30", "starlette>=0.37"]
+dev = ["pytest>=8", "httpx"]
 
 [project.scripts]
 justify = "justify.cli:main"
 justify-mcp = "justify.mcp_server:main"
 
 [tool.setuptools]
-packages = ["justify"]
+packages = ["justify", "justify.hosted"]
+
+[tool.setuptools.package-data]
+"justify.hosted" = ["static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

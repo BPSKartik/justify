@@ -31,6 +31,7 @@ import os
 import pathlib
 import re
 import shutil
+import signal
 import subprocess
 import tempfile
 import tokenize
@@ -39,6 +40,10 @@ from collections import defaultdict
 from .model import Finding
 
 PROVABLE_KINDS = {"import", "function", "class"}
+
+# names of environment variables that hold secrets; they never reach the tests
+SECRET_ENV = re.compile(r"TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|ACCESS_?KEY|PRIVATE|CREDENTIAL|^AZURE_|^AWS_|"
+                        r"^GITHUB_|^ANTHROPIC_|^OPENAI_|^JUSTIFY_MCP", re.I)
 
 # never copied: version control and caches. Matched as directories only — a file
 # called .env or build is part of the project and the tests may need it.
@@ -220,7 +225,8 @@ class _Runner:
         self.baseline: dict[str, int] = {}
 
     def run(self, trace: bool = False) -> tuple[bool, str]:
-        env = dict(os.environ)
+        # the tests are the repository's code: they get no secrets (tokens, keys, passwords)
+        env = {k: v for k, v in os.environ.items() if not SECRET_ENV.search(k)}
         # the copy comes first on the path, so an editable install of the original cannot
         # answer the imports in its place
         paths = [str(self.copy_root), str(self.copy_root / "src")]
@@ -230,12 +236,19 @@ class _Runner:
             env["JUSTIFY_TRACE_DIR"] = str(self.trace_dir)
         env["PYTHONPATH"] = os.pathsep.join(paths + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else []))
         env.setdefault("PYTHONDONTWRITEBYTECODE", "1")
+        p = subprocess.Popen(self.command, shell=True, cwd=self.copy_root, stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, text=True, env=env, start_new_session=True)
         try:
-            r = subprocess.run(self.command, shell=True, cwd=self.copy_root, capture_output=True, text=True,
-                               timeout=self.timeout, env=env)
+            out, _ = p.communicate(timeout=self.timeout)
         except subprocess.TimeoutExpired:
+            # kill the whole process group: a test runner's children must not outlive the run
+            try:
+                os.killpg(p.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            p.communicate()
             return False, f"tests did not finish within {self.timeout}s"
-        out = r.stdout + r.stderr
+        r = p
         if r.returncode != 0:
             return False, out[-1200:]
         if self.baseline:

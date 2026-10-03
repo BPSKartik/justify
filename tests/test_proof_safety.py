@@ -45,8 +45,8 @@ def test_symlinked_file_is_never_written(make_repo, tmp_path):
     root = make_repo({"app.py": "import settings\nprint(settings.MODE)\n"})
     (root / "settings.py").symlink_to(outside / "production.py")
     res = run(root, prove_command=f"{PY_CMD} app.py", record=False)
-    t = by_name(res)[("settings.py", "time")]
-    assert t.proof.startswith("not provable") and t.final == "KEEP"
+    # a file reached through a symlink is not part of the repository: never read, never edited
+    assert ("settings.py", "time") not in by_name(res)
     assert (outside / "production.py").read_text() == "import time\nMODE = 'live'\n"
 
 
@@ -132,3 +132,47 @@ def test_bom_is_kept_when_editing(make_repo):
     res = run(root, prove_command=f"{PY_CMD} check.py", record=False)
     assert by_name(res)[("app.py", "io")].proof == "passed"
     assert (root / "app.py").read_bytes().startswith(b"\xef\xbb\xbf")     # the original is untouched
+
+
+# ---------------------------------------------------------------- hostile repositories
+
+def test_symlinks_out_of_the_repository_are_never_read(make_repo, tmp_path):
+    secret = tmp_path / "secret.txt"
+    secret.write_text("ghp_FAKEtokenNotReal\n")
+    outside_py = tmp_path / "outside.py"
+    outside_py.write_text("def leaked():\n    return 1\n")
+    root = make_repo({"app.py": "x = 1\n"})
+    (root / "requirements.txt").symlink_to(secret)
+    (root / "linked.py").symlink_to(outside_py)
+    (root / "notes.yml").symlink_to(secret)
+    res = run(root, record=False)
+    assert not any("ghp_" in f.name or f.name == "leaked" for f in res.findings)
+    assert res.files == 1
+
+
+def test_one_pathological_function_does_not_crash_the_scan(make_repo):
+    deep = "def deep():\n    return " + " + ".join(["1"] * 3000) + "\n"
+    root = make_repo({"deep.py": deep, "app.py": "import io\nx = 1\n"})
+    res = run(root, record=False)
+    assert any(f.name == "io" and f.verdict == "REMOVE" for f in res.findings)
+
+
+def test_tests_never_see_secrets_and_hung_children_are_killed(make_repo, monkeypatch):
+    import os
+    import time as _time
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_should_not_leak")
+    monkeypatch.setenv("MY_SERVICE_API_KEY", "sk_should_not_leak")
+    monkeypatch.setenv("APP_MODE", "test")
+    root = make_repo({"app.py": "import io\nx = 1\n",
+                      "check.py": "import os, app\nassert 'GITHUB_TOKEN' not in os.environ\n"
+                                  "assert 'MY_SERVICE_API_KEY' not in os.environ\nassert os.environ['APP_MODE'] == 'test'\n"})
+    res = run(root, prove_command=f"{PY_CMD} check.py", record=False)
+    assert by_name(res)[("app.py", "io")].proof == "passed"
+
+    from justify.proof import _Runner
+    import pathlib, tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        r = _Runner("sleep 30 & sleep 30; wait", pathlib.Path(tmp), 1, pathlib.Path(tmp))
+        start = _time.time()
+        ok, out = r.run()
+        assert not ok and "did not finish" in out and _time.time() - start < 10

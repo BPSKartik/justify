@@ -121,7 +121,8 @@ def test_dead_weight_is_attributed_to_ai_or_human(make_repo, git_repo):
     a = res.metrics["attribution"]
     assert a["ai_commits"] == 1 and a["commits"] == 2
     assert a["ai_dead_per_1000"] > a["human_dead_per_1000"]
-    assert a["ai_to_human_ratio"] is not None
+    assert a["ai_to_human_ratio"] is None              # a handful of lines is too few for a ratio
+    assert a["ratio_needs_lines"] == 500
 
 
 def test_folder_inside_another_repo_is_not_attributed(make_repo, git_repo, tmp_path):
@@ -198,3 +199,21 @@ def test_judging_reports_progress_and_stops_after_two_failures(make_repo):
     assert Down.calls == 2                                      # gave up after two failures in a row
     assert lines[0].startswith("judging 1/4: app.py:")
     assert all(f.final == "REMOVE" for f in res.findings)       # a failed model never vetoes
+
+
+def test_cli_progress_version_and_friendly_errors(make_repo, capsys):
+    import json as _json
+    from justify.cli import main
+    root = make_repo({"app.py": "import io\nx = 1\n"})
+    assert main(["scan", str(root), "--json", "--no-record", "--progress"]) == 0
+    out, err = capsys.readouterr()
+    stages = [_json.loads(line)["stage"] for line in err.strip().splitlines()]
+    assert stages[:3] == ["ingest", "facts", "candidates"] and stages[-1] == "metrics"
+    assert _json.loads(out)["files"] == 1                         # stdout is only the JSON document
+    assert main(["scan", str(root / "missing"), "--no-record"]) == 2
+    assert "Not a folder" in capsys.readouterr().err
+    try:
+        main(["--version"])
+    except SystemExit:
+        pass
+    assert "justify 1.0.0" in capsys.readouterr().out

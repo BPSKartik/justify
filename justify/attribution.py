@@ -108,6 +108,20 @@ class Attribution:
         """Kind for every line of a file: index 0 is line 1."""
         return [self._kind_of(s) if s else "unknown" for s in self._file_shas(rel)]
 
+    def prefetch(self, files: list[str]) -> None:
+        """Blame many files at once. git blame is one process per file and most of its time is
+        spent waiting, so running them side by side turns minutes into seconds on a big repository."""
+        if not self.enabled:
+            return
+        self._load_all_commits()            # before the threads: they only read it
+        todo = [f for f in files if f not in self._blame]
+        if not todo:
+            return
+        from concurrent.futures import ThreadPoolExecutor
+        workers = int(os.environ.get("JUSTIFY_BLAME_WORKERS") or min(16, (os.cpu_count() or 4) * 2))
+        with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+            list(pool.map(self._file_shas, todo))
+
     def span(self, rel: str, start: int, end: int) -> str:
         if not self.enabled:
             return "unknown"

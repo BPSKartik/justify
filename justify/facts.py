@@ -25,7 +25,7 @@ import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
 
-from .ingest import SourceFile, is_skipped, other_files
+from .ingest import SourceFile, inside, is_skipped, other_files
 
 IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 DYNAMIC_CALLS = {"getattr", "globals", "locals", "vars", "__import__", "eval", "exec",
@@ -421,7 +421,10 @@ def file_facts(src: SourceFile, refs: dict[str, list[tuple[str, int]]]) -> FileF
                          node=node, start=start, end=node.end_lineno or node.lineno,
                          decorated=bool(node.decorator_list), decorators=decos)
             if df.kind == "function":
-                df.body_hash, df.nodes = _body_hash(node)
+                try:
+                    df.body_hash, df.nodes = _body_hash(node)
+                except (RecursionError, MemoryError):
+                    df.body_hash, df.nodes = None, 0      # too deep to compare; never a duplicate
             else:
                 df.bases = [_decorator_text(b).split("[")[0] for b in node.bases]
                 df.rel = src.rel
@@ -452,7 +455,7 @@ def _library_roots(root: pathlib.Path) -> list[str]:
     for marker in ("setup.py", "setup.cfg", "pyproject.toml"):
         for path in root.rglob(marker):
             rel_parts = path.relative_to(root).parts
-            if is_skipped(rel_parts[:-1]):
+            if is_skipped(rel_parts[:-1]) or not inside(root, path):
                 continue
             if _looks_like_library(path.parent):
                 out.append("/".join(rel_parts[:-1]))
@@ -463,7 +466,7 @@ def _looks_like_library(root: pathlib.Path) -> bool:
     if (root / "setup.py").exists() or (root / "setup.cfg").exists():
         return True
     pp = root / "pyproject.toml"
-    if pp.exists():
+    if pp.exists() and not pp.is_symlink():
         text = pp.read_text(encoding="utf-8", errors="replace")
         return "[project]" in text or "[tool.poetry]" in text
     return False
@@ -601,7 +604,16 @@ def _config_loaded(rels, others) -> dict[str, str]:
 
 def repo_facts(root: pathlib.Path, sources: list[SourceFile]) -> RepoFacts:
     refs: dict[str, list[tuple[str, int]]] = defaultdict(list)
-    files = {s.rel: file_facts(s, refs) for s in sources}
+    files = {}
+    for s in sources:
+        try:
+            files[s.rel] = file_facts(s, refs)
+        except (RecursionError, MemoryError) as exc:
+            # one pathological file (a 250-term expression chain) must not take the scan down:
+            # it is recorded as unparsed, and its words still protect the names it mentions
+            s.error = f"{exc.__class__.__name__}: too deeply nested to analyse"
+            s.tree = None
+            files[s.rel] = file_facts(s, refs)
 
     imported_roots: set[str] = set()
     for ff in files.values():

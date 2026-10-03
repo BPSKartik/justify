@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Justify — every line earns its place</title>
+<meta name="description" content="Audit any public GitHub repository for code that cannot justify its existence, split by AI-assisted and human authorship. Connect any AI assistant over MCP.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Condensed:wght@600;700&display=swap">
+<link rel="stylesheet" href="/static/styles.css">
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="top">
+  <div class="wrap top-row">
+    <a class="brand" href="/" aria-label="Justify, home">
+      <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="5" width="26" height="4" rx="1"/><rect x="3" y="14" width="17" height="4" rx="1" class="cut"/><rect x="3" y="23" width="22" height="4" rx="1"/><path d="M23 13.5l3 3 5-6" class="tick"/></svg>
+      <span>Justify</span>
+    </a>
+    <nav aria-label="Sections">
+      <a href="#how">How it works</a>
+      <a href="#connect">Connect your AI</a>
+      <a href="https://github.com/BPSKartik/justify" rel="noopener">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <section class="hero" aria-labelledby="hero-title">
+    <div class="wrap">
+      <p class="eyebrow">Does the AI assistant actually pay off?</p>
+      <h1 id="hero-title">Every line has to <em>earn its place.</em></h1>
+      <p class="lede">Justify reads a whole repository, finds the code that cannot justify its existence — unused imports, functions, classes and dependencies, and duplicate helpers — and shows how much of it came from AI-assisted commits.</p>
+
+      <form id="scan-form" class="scan-form" novalidate>
+        <label for="repo" class="sr-only">Public GitHub repository</label>
+        <div class="field">
+          <span class="field-prefix" aria-hidden="true">github.com/</span>
+          <input id="repo" name="repo" type="text" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false"
+                 placeholder="owner/repository" aria-describedby="repo-hint repo-error" required>
+          <button id="scan-btn" type="submit">Audit it</button>
+        </div>
+        <p id="repo-error" class="field-error" role="alert" hidden></p>
+        <p id="repo-hint" class="hint">Public Python repositories. Read-only: the hosted service never runs your code.
+          Try <button type="button" class="example" data-repo="PrefectHQ/fastmcp">PrefectHQ/fastmcp</button>,
+          <button type="button" class="example" data-repo="judeper/FSI-CopilotGov">judeper/FSI-CopilotGov</button> or
+          <button type="button" class="example" data-repo="Azure/azure-functions-agents-runtime">Azure/azure-functions-agents-runtime</button>.</p>
+      </form>
+    </div>
+  </section>
+
+  <section id="scan" class="scan" hidden aria-live="polite">
+    <div class="wrap">
+      <div class="scan-head">
+        <div>
+          <p class="eyebrow" id="scan-eyebrow">Auditing</p>
+          <h2 id="scan-repo" class="repo-name"></h2>
+          <p id="scan-meta" class="meta"></p>
+        </div>
+        <p id="scan-clock" class="clock" aria-hidden="true"></p>
+      </div>
+
+      <ol class="rail" id="rail" aria-label="Audit stages">
+        <li data-stage="clone"><span class="dot"></span><span class="rail-name">Fetch</span><span class="rail-note">history included</span></li>
+        <li data-stage="ingest"><span class="dot"></span><span class="rail-name">Read</span><span class="rail-note">every Python file</span></li>
+        <li data-stage="facts"><span class="dot"></span><span class="rail-name">Map</span><span class="rail-note">who uses what</span></li>
+        <li data-stage="candidates"><span class="dot"></span><span class="rail-name">Question</span><span class="rail-note">what needs a reason</span></li>
+        <li data-stage="attribution"><span class="dot"></span><span class="rail-name">Attribute</span><span class="rail-note">AI-assisted or human</span></li>
+        <li data-stage="metrics"><span class="dot"></span><span class="rail-name">Score</span><span class="rail-note">the payoff</span></li>
+        <li data-stage="local" class="local"><span class="dot"></span><span class="rail-name">Judge &amp; prove</span><span class="rail-note">on your machine</span></li>
+      </ol>
+      <p id="scan-status" class="status"></p>
+
+      <div id="scan-failed" class="notice notice-bad" hidden>
+        <h3 id="fail-title">The audit could not finish</h3>
+        <p id="fail-text"></p>
+        <p id="fail-local" hidden>For private code, or a repository this large, run Justify on your own machine — see <a href="#local">install locally</a>.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="result" class="result" hidden aria-labelledby="result-title">
+    <div class="wrap">
+      <div class="statement">
+        <div class="statement-head">
+          <div>
+            <p class="eyebrow">Audit statement</p>
+            <h2 id="result-title" class="repo-name"></h2>
+            <p id="result-meta" class="meta"></p>
+          </div>
+          <div class="actions">
+            <button type="button" id="copy-link" class="ghost">Copy link</button>
+            <button type="button" id="copy-report" class="ghost">Copy report</button>
+            <a id="download-md" class="ghost" download>Download .md</a>
+          </div>
+        </div>
+
+        <div class="balance">
+          <div class="jlr">
+            <p class="jlr-label">Justified Line Ratio</p>
+            <p class="jlr-value"><span id="jlr"></span><span class="pct">%</span></p>
+            <p class="jlr-sub" id="jlr-sub"></p>
+          </div>
+          <dl class="ledger" id="ledger"></dl>
+        </div>
+
+        <div class="authors" id="authors" hidden>
+          <div class="authors-head">
+            <h3>Who wrote it</h3>
+            <p class="meta" id="authors-meta"></p>
+          </div>
+          <div class="split" id="split" role="img"></div>
+          <div class="compare" id="compare"></div>
+          <p class="caveat">AI-assisted means the commit carries an assistant trailer such as <code>Co-Authored-By: Claude</code>. Assistants used without one count as human, so the AI share is a lower bound. Ratios need at least 500 lines on each side.</p>
+        </div>
+        <p class="notice notice-quiet" id="no-git" hidden>Authorship could not be traced for this repository.</p>
+
+        <div class="findings">
+          <div class="findings-head">
+            <h3>Line items <span class="count" id="findings-count"></span></h3>
+            <div class="filters" role="group" aria-label="Filter by verdict" id="verdict-filters"></div>
+          </div>
+          <div class="search-row">
+            <label for="search" class="sr-only">Search findings</label>
+            <input id="search" type="search" placeholder="Search file or name" autocomplete="off">
+            <label class="kind-select"><span class="sr-only">Kind</span>
+              <select id="kind">
+                <option value="">Every kind</option>
+                <option value="import">Imports</option>
+                <option value="function">Functions</option>
+                <option value="class">Classes</option>
+                <option value="duplicate">Duplicates</option>
+                <option value="dependency">Dependencies</option>
+              </select>
+            </label>
+          </div>
+          <ol class="items" id="items"></ol>
+          <p class="empty" id="items-empty" hidden>Nothing matches.</p>
+          <p class="footnote">REMOVE means no use was found anywhere in the repository. The hosted audit never runs code, so nothing here is proved yet — Justify proves removals with your own tests when you run it locally.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="recent" id="recent-wrap" hidden aria-labelledby="recent-title">
+    <div class="wrap">
+      <h2 id="recent-title" class="section-title">Recently audited</h2>
+      <ul class="recent-list" id="recent"></ul>
+    </div>
+  </section>
+
+  <section id="connect" class="connect" aria-labelledby="connect-title">
+    <div class="wrap">
+      <p class="eyebrow">Model Context Protocol</p>
+      <h2 id="connect-title" class="section-title">Let your AI assistant check its own work.</h2>
+      <p class="section-lede">The assistant that writes the code can call Justify before it hands the code over. One URL, no account, no key:</p>
+      <div class="endpoint"><code id="endpoint"></code><button type="button" class="ghost copy" data-copy-target="endpoint">Copy</button></div>
+
+      <div class="tabs" role="tablist" aria-label="AI assistants" id="client-tabs"></div>
+      <div class="panes" id="client-panes"></div>
+
+      <div class="local" id="local">
+        <h3>Private code, and proof</h3>
+        <p>The hosted audit reads public repositories and never runs anything. To audit private code, and to <b>prove</b> each removal by running your own tests on a temporary copy, run Justify locally:</p>
+        <pre class="code"><code id="local-install">pip install "justify-code[mcp] @ git+https://github.com/BPSKartik/justify"</code><button type="button" class="ghost copy" data-copy-target="local-install">Copy</button></pre>
+        <pre class="code"><code id="local-run">justify scan . --prove "python -m pytest -q"</code><button type="button" class="ghost copy" data-copy-target="local-run">Copy</button></pre>
+        <p class="meta">As a local MCP server: command <code>justify-mcp</code>, with <code>JUSTIFY_TEST_COMMAND</code> (the only command it will run) and <code>JUSTIFY_ALLOWED_ROOTS</code> (the only folders it may read).</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="how" class="how" aria-labelledby="how-title">
+    <div class="wrap">
+      <h2 id="how-title" class="section-title">Seven stages. The model never deletes.</h2>
+      <ol class="stages">
+        <li><b>Ingest</b><span>Every file read once and fingerprinted.</span></li>
+        <li><b>Static facts</b><span>Syntax trees, not text search: who uses what, across the whole repository.</span></li>
+        <li><b>Candidates</b><span>Anything a graph can misjudge — frameworks, dynamic lookups, re-exports — waits for judgement.</span></li>
+        <li class="model"><b>Justify</b><span>A model is asked why the unit exists, and must cite a file and line that is then checked.</span></li>
+        <li class="model"><b>Challenge</b><span>A second call tries to prove the code is needed. If it can, the code stays.</span></li>
+        <li class="proof"><b>Proof</b><span>Removed in a temporary copy, then your tests run. A file the tests never load is “not provable”.</span></li>
+        <li><b>Report</b><span>One report with a reason on every line, and a ledger of every run. A person approves.</span></li>
+      </ol>
+      <p class="meta">This site runs stages 1–3 plus authorship. Stages 4–6 run on your machine, with your model and your tests.</p>
+    </div>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-row">
+    <p>Justify · MIT licensed · <a href="https://github.com/BPSKartik/justify" rel="noopener">source on GitHub</a></p>
+    <p>Team Error 404 · Microsoft Innovate 2026 · Bennett University</p>
+  </div>
+</footer>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>
