@@ -5,6 +5,8 @@ Stages 4 and 5 need a model that answers in JSON. Which model is a deployment
 choice, not a design one, so any of these works and is picked from the
 environment — keys are read from environment variables and never stored:
 
+  foundry        JUSTIFY_FOUNDRY_ENDPOINT + JUSTIFY_FOUNDRY_MODELS (Azure AI Foundry, signed in
+                 with `az login` — no key). Several models make a jury.
   azure          AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, AZURE_OPENAI_DEPLOYMENT
                  (the model runs inside the customer's own Azure tenant)
   openai         JUSTIFY_LLM_BASE_URL (+ JUSTIFY_LLM_API_KEY, JUSTIFY_LLM_MODEL) —
@@ -27,6 +29,7 @@ import re
 import shutil
 import ssl
 import subprocess
+import time
 import urllib.error
 import urllib.request
 
@@ -57,14 +60,22 @@ def _ssl_context() -> ssl.SSLContext:
 
 
 def _extract_json(text: str) -> dict:
-    text = text.strip()
+    # reasoning models (Phi-4-reasoning, gpt-oss) may think out loud first
+    text = re.sub(r"<think>.*?</think>", "", text or "", flags=re.S).strip()
     try:
-        return json.loads(text)
+        out = json.loads(text)
     except json.JSONDecodeError:
         m = re.search(r"\{.*\}", text, re.S)
         if not m:
-            raise ModelError(f"model did not answer in JSON: {text[:160]!r}")
-        return json.loads(m.group(0))
+            raise ModelError(f"model did not answer in JSON: {text[:160]!r}") from None
+        try:
+            out = json.loads(m.group(0))
+        except json.JSONDecodeError:
+            # truncated or malformed: that juror's answer is void, the run goes on
+            raise ModelError(f"model answered with broken JSON: {text[:120]!r}") from None
+    if not isinstance(out, dict):
+        raise ModelError(f"model answered JSON that is not an object: {text[:120]!r}")
+    return out
 
 
 class Model:
@@ -75,33 +86,103 @@ class Model:
 
 
 class _HttpChat(Model):
-    def __init__(self, url: str, headers: dict, model: str | None, name: str):
-        self.url, self.headers, self.model, self.name = url, headers, model, name
+    """An OpenAI-style chat endpoint. Models differ in what they accept — GPT-5 refuses a
+    temperature, some open models refuse response_format — so a 400 that names one of those
+    is retried without it, and the model is remembered as not taking it."""
+
+    def __init__(self, url: str, headers: dict, model: str | None, name: str, auth=None):
+        self.url, self.headers, self.model, self.name, self.auth = url, headers, model, name, auth
+        self.timeout = int(os.environ.get("JUSTIFY_MODEL_TIMEOUT_S") or 90)
+        reasoning = bool(re.match(r"(gpt-5|o\d)", (model or "").lower()))
+        # optional knobs: a model that rejects one by name gets the request again without it
+        self.options: dict = ({"max_completion_tokens": 2500, "reasoning_effort": "low"} if reasoning
+                              else {"max_tokens": 2500, "temperature": 0})
+        self.options["response_format"] = {"type": "json_object"}
+        self.seconds = 0.0
+
+    def _post(self, body: dict) -> dict:
+        headers = {"Content-Type": "application/json", **self.headers}
+        if self.auth:
+            headers["Authorization"] = f"Bearer {self.auth()}"
+        req = urllib.request.Request(self.url, data=json.dumps(body).encode(), headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=self.timeout, context=_ssl_context()) as r:
+            raw, status = r.read(), r.status
+        try:
+            return json.loads(raw.decode("utf-8", errors="replace"))
+        except json.JSONDecodeError:
+            # a retired or wrong endpoint can answer 200 with an empty or HTML body
+            raise ModelError(f"{self.name}: the endpoint answered HTTP {status} with "
+                             f"{len(raw)} bytes that are not JSON — check the URL and model") from None
 
     def ask(self, system: str, user: str) -> dict:
-        body = {"messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-                "temperature": 0, "response_format": {"type": "json_object"}}
-        if self.model:
-            body["model"] = self.model
-        req = urllib.request.Request(self.url, data=json.dumps(body).encode(),
-                                     headers={"Content-Type": "application/json", **self.headers}, method="POST")
-        try:
-            with urllib.request.urlopen(req, timeout=120, context=_ssl_context()) as r:
-                raw, status = r.read(), r.status
+        start = time.monotonic()
+        for attempt in range(7):
+            body = {"messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+                    **self.options}
+            if self.model:
+                body["model"] = self.model
             try:
-                data = json.loads(raw.decode("utf-8", errors="replace"))
-            except json.JSONDecodeError:
-                # a retired or wrong endpoint can answer 200 with an empty or HTML body
-                raise ModelError(f"{self.name}: the endpoint answered HTTP {status} with "
-                                 f"{len(raw)} bytes that are not JSON — check the URL and model") from None
-        except urllib.error.HTTPError as exc:
-            raise ModelError(f"{self.name}: HTTP {exc.code} {exc.read()[:200]!r}") from None
-        except urllib.error.URLError as exc:
-            raise ModelError(f"{self.name}: {exc.reason}") from None
+                data = self._post(body)
+                break
+            except urllib.error.HTTPError as exc:
+                said = exc.read()[:400].decode("utf-8", errors="replace")
+                low = said.lower()
+                named = next((k for k in self.options if k in low or (k == "response_format" and "json" in low)), None)
+                if exc.code == 400 and named:
+                    self.options.pop(named)
+                    continue
+                if exc.code == 429 and attempt < 6:
+                    time.sleep(min(30, int(exc.headers.get("Retry-After") or 5 * (attempt + 1))))
+                    continue
+                raise ModelError(f"{self.name}: HTTP {exc.code} {said[:200]!r}") from None
+            except urllib.error.URLError as exc:
+                raise ModelError(f"{self.name}: {exc.reason}") from None
+            except (TimeoutError, OSError) as exc:      # a slow model is one juror short, not a crash
+                raise ModelError(f"{self.name}: no answer within {self.timeout} s ({exc.__class__.__name__})") from None
+        else:
+            raise ModelError(f"{self.name}: gave up after repeated rate limits")
+        self.seconds = round(time.monotonic() - start, 1)
         try:
             return _extract_json(data["choices"][0]["message"]["content"])
-        except (KeyError, IndexError) as exc:
+        except (KeyError, IndexError, TypeError) as exc:
             raise ModelError(f"{self.name}: unexpected response shape") from exc
+
+
+class EntraToken:
+    """A Microsoft Entra ID token for Azure AI Foundry, from the Azure CLI's own sign-in
+    (`az login`). No key is created, stored or passed around; the token is refreshed before
+    it expires."""
+
+    def __init__(self, resource: str = "https://cognitiveservices.azure.com"):
+        self.resource, self.token, self.expires = resource, None, 0.0
+
+    def __call__(self) -> str:
+        if self.token and time.time() < self.expires - 300:
+            return self.token
+        az = shutil.which("az") or next((p for p in ("/opt/homebrew/bin/az", "/usr/local/bin/az", "/usr/bin/az")
+                                         if os.path.exists(p)), None)
+        if not az:
+            raise ModelError("foundry: the Azure CLI (az) is not installed — sign in with `az login`")
+        r = subprocess.run([az, "account", "get-access-token", "--resource", self.resource, "-o", "json"],
+                           capture_output=True, text=True, timeout=60)
+        if r.returncode != 0:
+            raise ModelError("foundry: no Azure sign-in — run `az login`, then try again")
+        d = json.loads(r.stdout)
+        self.token = d["accessToken"]
+        self.expires = float(d.get("expires_on") or (time.time() + 3000))
+        return self.token
+
+
+class Jury(Model):
+    """Several models from different makers, asked the same question independently. The
+    rule for what the jury may decide lives in judge.py; this only holds the panel."""
+
+    def __init__(self, members: list[Model], challenger: Model):
+        self.members, self.challenger = members, challenger
+        self.name = "jury of " + ", ".join(m.name for m in members)
+
+    def ask(self, system: str, user: str) -> dict:          # a jury answers through judge.py
+        return self.challenger.ask(system, user)
 
 
 class ClaudeCli(Model):
@@ -149,20 +230,43 @@ def from_environment() -> Model | None:
             return _HttpChat(f"{base.rstrip('/')}/chat/completions", headers,
                              env.get("JUSTIFY_LLM_MODEL", "gpt-4.1-mini"), f"openai:{base}")
 
+    def foundry():
+        """Azure AI Foundry: one endpoint, many makers' models. JUSTIFY_FOUNDRY_MODELS lists the
+        deployments; more than one makes a jury. "claude-cli" in the list adds Claude locally."""
+        base = env.get("JUSTIFY_FOUNDRY_ENDPOINT")
+        names = [n.strip() for n in env.get("JUSTIFY_FOUNDRY_MODELS", "").split(",") if n.strip()]
+        if not base or not names:
+            return None
+        token = EntraToken()
+        url = f"{base.rstrip('/')}/models/chat/completions?api-version=2024-05-01-preview"
+        members: list[Model] = []
+        for n in names:
+            if n == "claude-cli":
+                c = claude()
+                if c:
+                    members.append(c)
+                continue
+            members.append(_HttpChat(url, {}, n, n, auth=token))
+        if len(members) == 1:
+            return members[0]
+        wanted = env.get("JUSTIFY_JURY_CHALLENGER", names[0])
+        challenger = next((m for m in members if m.name == wanted), members[0])
+        return Jury(members, challenger)
+
     def claude():
         for candidate in (env.get("JUSTIFY_CLAUDE_BIN"), shutil.which("claude"),
                           os.path.expanduser("~/.local/bin/claude")):
             if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
                 return ClaudeCli(candidate)
 
-    order = {"azure": azure, "openai": openai_compatible, "claude-cli": claude}
+    order = {"azure": azure, "foundry": foundry, "openai": openai_compatible, "claude-cli": claude}
     if choice == "github":
         raise ValueError("GitHub Models was retired on 30 July 2026. Use azure, openai (any OpenAI-compatible "
                          "server, including Ollama) or claude-cli.")
     if choice:
         fn = order.get(choice)
         return fn() if fn else None
-    for fn in (azure, openai_compatible, claude):
+    for fn in (foundry, azure, openai_compatible, claude):
         m = fn()
         if m:
             return m

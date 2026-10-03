@@ -54,6 +54,11 @@ What the data says, honestly:
 Caveats: authorship comes from commit trailers, so the AI share is a lower bound; rework counts
 from the first AI-assisted commit, and newer code has had less time to be rewritten.
 
+## Use it in the browser
+
+**https://justify.xeta.in** — paste a public GitHub repository and watch it audited. The hosted
+service reads code only: it never runs the repository or its tests, and never calls a model.
+
 ## Install
 
 ```bash
@@ -117,12 +122,37 @@ Chosen from the environment; keys are read from environment variables and never 
 
 | Provider | Variables |
 |---|---|
+| Azure AI Foundry (one model, or a jury) | `JUSTIFY_FOUNDRY_ENDPOINT`, `JUSTIFY_FOUNDRY_MODELS` — signed in with `az login`, no key |
 | Azure OpenAI | `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_DEPLOYMENT` |
 | Any OpenAI-compatible server (incl. local Ollama) | `JUSTIFY_LLM_BASE_URL`, `JUSTIFY_LLM_API_KEY`, `JUSTIFY_LLM_MODEL` |
 | Claude Code CLI | installed and signed in once (`claude`, then `/login`); found on PATH or in `~/.local/bin` |
 
-Force one with `JUSTIFY_LLM_PROVIDER=azure|openai|claude-cli`. With no model, stages 4-5 are
+Force one with `JUSTIFY_LLM_PROVIDER=foundry|azure|openai|claude-cli`. With no model, stages 4-5 are
 skipped and every undecided unit stays.
+
+### The jury
+
+One model can be wrong in ways it cannot see. List several models from different makers in
+`JUSTIFY_FOUNDRY_MODELS` and they sit as a jury: each answers stage 4 on its own, in parallel.
+
+- **Removing needs near agreement:** every juror but one must say remove, with confidence.
+- **One juror with real evidence keeps the code:** a keep that cites a `file:line` that checks out wins.
+- **Then a challenge:** the strongest model (`JUSTIFY_JURY_CHALLENGER`) tries to prove the code is needed.
+- **Anything else keeps the code** and is flagged as a split for a person to look at.
+- **The tests grade the jury:** with `--prove`, every juror's vote is marked right or wrong against the
+  proof, and the scoreboard is printed. Over many runs it shows which model is actually good at
+  judging code — measured, not claimed.
+
+```bash
+az login
+export JUSTIFY_FOUNDRY_ENDPOINT=https://<your-resource>.services.ai.azure.com
+export JUSTIFY_FOUNDRY_MODELS=gpt-5.6-sol,Phi-4-reasoning,gpt-oss-120b,Llama-3.3-70B-Instruct
+export JUSTIFY_JURY_CHALLENGER=gpt-5.6-sol
+justify scan . --judge --prove "python -m pytest -q"
+```
+
+Add `claude-cli` to the list to seat Claude as a juror too. A juror that times out or answers
+nonsense is left out of that vote; with fewer than two answers, the code stays.
 
 ## Safety
 

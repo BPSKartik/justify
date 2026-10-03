@@ -44,6 +44,28 @@ class Result:
 MIN_SAMPLE_LINES = 500
 
 
+def scoreboard(findings: list[Finding]) -> dict:
+    """The tests grade the jury. Where the proof settled a unit — removed and the tests passed,
+    or removed and they failed — each juror's vote is marked right or wrong. Over many runs this
+    says which model is actually good at judging code, measured rather than claimed."""
+    board: dict[str, dict[str, int]] = {}
+    for f in findings:
+        votes = (f.judgement or {}).get("jury") or []
+        if f.proof == "passed":
+            truth = "remove"
+        elif f.proof.startswith("failed"):
+            truth = "keep"
+        else:
+            continue
+        for v in votes:
+            if "error" in v:
+                continue
+            said = "remove" if v["verdict"] == "remove" and v["confidence"] >= 0.7 else "keep"
+            row = board.setdefault(v["model"], {"right": 0, "wrong": 0})
+            row["right" if said == truth else "wrong"] += 1
+    return board
+
+
 def _payoff(findings: list[Finding], total_lines: int, att: Attribution, files: list[str]) -> dict[str, Any]:
     dead = [f for f in findings if f.final == REMOVE and f.kind in ("import", "function", "class")]
     proved = [f for f in dead if f.proof == "passed"]
@@ -149,6 +171,8 @@ def run(root: str | pathlib.Path, *, model: Model | None = None, prove_command: 
             if f.final == REMOVE and f.kind in ("import", "function", "class") and f.proof != "passed":
                 f.final = KEEP
         stage("proof", f"{proof.get('passed', 0)} of {proof.get('candidates', 0)} removals proved")
+        if model is not None:
+            judging["scoreboard"] = scoreboard(findings)
 
     py_files = [s.rel for s in sources]
     metrics = _payoff(findings, rf.total_lines, att, py_files)

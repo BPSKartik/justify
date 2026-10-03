@@ -207,3 +207,11 @@ def test_mcp_judge_needs_the_owner_to_allow_it(make_repo, monkeypatch):
     monkeypatch.setenv("JUSTIFY_ALLOW_JUDGE", "1")
     mcp_server.scan_repository(str(root), judge=True)
     assert calls == [1]
+
+
+def test_broken_model_json_is_a_model_error_not_a_crash():
+    from justify.llm import ModelError, _extract_json
+    for bad in ['{"verdict": "keep", "reason": "unterminated', '[1, 2]', 'no json here', '<think>{x</think> {"a": ']:
+        with pytest.raises(ModelError):
+            _extract_json(bad)
+    assert _extract_json('<think>maybe {not}</think>\n{"verdict": "keep"}') == {"verdict": "keep"}
