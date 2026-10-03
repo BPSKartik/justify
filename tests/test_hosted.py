@@ -188,7 +188,7 @@ def test_mcp_over_stateless_http(client):
     r = client.post("/mcp", json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
                     headers={**hdr, "mcp-protocol-version": "2025-06-18"})
     names = sorted(t["name"] for t in r.json()["result"]["tools"])
-    assert names == ["get_scan_result", "scan_github_repo"]
+    assert names == ["audit_code", "get_scan_result", "my_audits", "scan_github_repo"]
 
 
 # ---------------------------------------------------------------- one real repository

@@ -1,0 +1,85 @@
+"""Every language gets a census and a copy check; assistants are recognised by their signatures,
+and only by their signatures."""
+
+import pathlib
+
+from justify import polyglot
+from justify.attribution import classify
+from justify.engine import run
+
+
+# ---------------------------------------------------------------- who signed the commit
+
+def test_assistant_signatures_are_recognised():
+    assert classify("fix\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>") == ("ai", "Claude")
+    assert classify("feat\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)") == ("ai", "Claude")
+    assert classify("x", "copilot-swe-agent[bot] <198982749+Copilot@users.noreply.github.com>")[1] == "GitHub Copilot"
+    assert classify("add parser", "Ada Lovelace (aider) <ada@example.com>") == ("ai", "Aider")
+    assert classify("x", "google-labs-jules[bot] <x@users.noreply.github.com>")[1] == "Gemini / Jules"
+    assert classify("x\n\nCo-authored-by: Cursor Agent <cursoragent@cursor.com>")[1] == "Cursor"
+    assert classify("x\n\nAssisted-by: some-new-tool")[0] == "ai"
+
+
+def test_mentions_and_people_are_not_signatures():
+    assert classify("Fix the cursor jumping in the editor") == ("human", None)
+    assert classify("Use Copilot-style naming in docs") == ("human", None)       # prose, not a trailer
+    assert classify("x\n\nCo-authored-by: Claude Monet <claude@paint.fr>") == ("human", None)
+    assert classify("x\n\nCo-authored-by: Devin Shah <devin@gmail.com>") == ("human", None)
+    assert classify("x", "Jules Verne <jules@nautilus.fr>") == ("human", None)
+
+
+# ---------------------------------------------------------------- census and copies
+
+BODY = """function total(items) {
+  let sum = 0;
+  for (const item of items) {
+    if (item.price > 0 && item.qty > 0) {
+      sum += item.price * item.qty;
+    }
+  }
+  const tax = sum * 0.18;
+  return Math.round((sum + tax) * 100) / 100;
+}
+"""
+
+
+def _write(root: pathlib.Path, files: dict[str, str]) -> None:
+    for rel, text in files.items():
+        p = root / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text)
+
+
+def test_a_copied_block_is_reported_once_at_the_later_place(tmp_path):
+    _write(tmp_path, {
+        "src/a.js": "import x from 'y';\n" + BODY,
+        # the same code, re-indented and with a comment in it, is still the same code
+        "src/b.js": "// helpers\n" + BODY.replace("  ", "    ").replace("let sum = 0;", "let sum = 0; /* start */"),
+        "src/c.js": "export const one = 1;\n",
+        "node_modules/lib/d.js": BODY,           # someone else's code is never audited
+        "README.md": "# demo\n",
+    })
+    files = polyglot.census(tmp_path)
+    found, note = polyglot.copies(files)
+    assert [(f.file, f.evidence[0]) for f in found] == [("src/b.js", "src/a.js:2")]
+    assert found[0].final == "SIMPLIFY" and found[0].lines >= 6
+    langs = {l["name"]: l for l in polyglot.summary(files)}
+    assert langs["JavaScript"]["files"] == 3 and langs["JavaScript"]["audit"] == "copies"
+    assert langs["Markdown"]["audit"] == "prose" and note["files"] == 3
+
+
+def test_short_or_trivial_repeats_are_not_copies(tmp_path):
+    trivial = "}\n".join(["case 1: break;\n"] * 10)
+    _write(tmp_path, {"a.c": "int a = 1;\nint b = 2;\n" + trivial, "b.c": "int a = 1;\nint b = 2;\n" + trivial})
+    found, _ = polyglot.copies(polyglot.census(tmp_path))
+    assert found == []
+
+
+def test_a_repository_without_python_still_gets_an_audit(tmp_path):
+    _write(tmp_path, {"lib/a.ts": BODY, "lib/b.ts": BODY, "notes.md": "hi\n"})
+    res = run(tmp_path, record=False)
+    assert res.files == 0 and res.metrics["jlr_percent"] is None
+    assert res.metrics["duplicate_lines"] > 0
+    assert [l["name"] for l in res.languages] == ["TypeScript", "Markdown"]
+    assert {r["path"] for r in res.files_detail} == {"lib/a.ts", "lib/b.ts"}
+    assert next(r for r in res.files_detail if r["path"] == "lib/b.ts")["dup"] > 0

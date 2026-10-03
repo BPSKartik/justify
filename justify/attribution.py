@@ -8,10 +8,15 @@ the same way. That turns "6 dead imports" into "AI-assisted lines carry N times
 the dead weight of human lines in this repository" — a statement about the
 assistant.
 
-A commit counts as AI-assisted when its message carries a trailer that the
-assistants themselves write: "Co-Authored-By: Claude …", "Co-authored-by:
-Copilot …", "Generated with Claude Code", and similar. That is a lower bound —
-an assistant used without a trailer is counted as human — and the report says so.
+A commit counts as AI-assisted when it carries a signature an assistant leaves
+behind: a trailer it writes ("Co-Authored-By: Claude …", "Assisted-by: …"), a
+"Generated with …" line, or the bot account an agent commits as (Copilot coding
+agent, Devin, Jules, Cursor Agent, Aider's "(aider)" author name, and others).
+Signatures are only read where an assistant writes them — trailers and commit
+identities — so a commit message that merely mentions "cursor" is not one.
+
+That is a lower bound. Code pasted from a chat window carries no signature, so it
+counts as "no AI trace", never as proof a person wrote it — and the report says so.
 """
 
 from __future__ import annotations
@@ -22,19 +27,81 @@ import re
 import subprocess
 from collections import Counter
 
-DEFAULT_PATTERNS = [
-    r"co-authored-by:[^\n]*(claude|copilot|chatgpt|gpt-?\d|openai|codex|cursor|gemini|devin|aider|"
-    r"windsurf|codeium|amazon q|codewhisperer|tabnine|anthropic)",
-    r"generated (with|by) \[?(claude|copilot|chatgpt|cursor|codex|gemini)",
-    r"noreply@anthropic\.com",
-    r"assisted-by:",
-    r"ai-generated",
+# (assistant, how its name appears inside a trailer, a "Generated with" line or a commit identity)
+TOOLS: list[tuple[str, str]] = [
+    # Claude is also a person's name: only the assistant's own forms count
+    ("Claude", r"anthropic|^claude(\s+(code|opus|sonnet|haiku|fable|\d[\w.]*))*\s*(<|$)|claude\[bot\]"),
+    ("GitHub Copilot", r"copilot"),
+    ("OpenAI Codex / ChatGPT", r"codex|chatgpt|openai|\bgpt-?\d"),
+    ("Cursor", r"cursor"),
+    ("Gemini / Jules", r"gemini|google-labs-jules|jules\[bot\]"),
+    ("Devin", r"devin-ai|devin\[bot\]|cognition"),
+    ("Aider", r"aider"),
+    ("Windsurf", r"windsurf|codeium"),
+    ("Amazon Q", r"amazon[ -]?q\b|codewhisperer"),
+    ("Tabnine", r"tabnine"),
+    ("Lovable", r"lovable|gpt-engineer"),
+    ("v0", r"\bv0\b"),
+    ("Bolt", r"bolt\.new|stackblitz"),
+    ("Replit Agent", r"replit"),
+    ("Cline / Roo Code", r"\bcline\b|roo[ -]?code"),
+    ("Kiro", r"\bkiro\b"),
+    ("OpenHands", r"openhands|all-hands\.dev"),
+    ("Sweep", r"sweep-ai|sweep\[bot\]"),
+    ("Codegen", r"codegen-sh|codegen\.com"),
 ]
+_TOOL_RES = [(name, re.compile(rx, re.I)) for name, rx in TOOLS]
+
+# where an assistant signs a commit: trailers it writes, and the line Claude Code / others add
+_TRAILER = re.compile(r"^[ \t]*(co-authored-by|assisted-by|generated-by|ai-assisted-by|made-with|"
+                      r"written-by|ai-agent)[ \t]*:[ \t]*(.+)$", re.I | re.M)
+_GENERATED = re.compile(r"generated (?:with|by|using)\s+\[?([^\]\n(]{2,60})", re.I)
+# the accounts agents commit as; an identity is "name <email>" for the author or the committer
+_AGENT_IDENTITY = re.compile(
+    r"copilot-swe-agent|^copilot <|devin-ai-integration|google-labs-jules|jules\[bot\]|lovable-dev|"
+    r"gpt-engineer-app|\bv0\[bot\]|cursoragent|cursor agent|\(aider\)|openhands|sweep-ai|codegen-sh|"
+    r"claude\[bot\]|chatgpt-codex-connector|amazon-q-developer|gemini-code-assist|replit-agent|"
+    r"noreply@anthropic\.com", re.I)
+
+
+def _tool_in(text: str) -> str | None:
+    for name, rx in _TOOL_RES:
+        if rx.search(text):
+            return name
+    return None
+
+
+def classify(message: str, author: str = "", committer: str = "",
+             extra: list[re.Pattern] | None = None) -> tuple[str, str | None]:
+    """("ai", assistant) or ("human", None) for one commit. Only places an assistant writes
+    are read — trailers, a "Generated with" line, the author and committer identities."""
+    for m in _TRAILER.finditer(message):
+        tool = _tool_in(m.group(2))
+        if tool:
+            return "ai", tool
+        if m.group(1).lower() in ("assisted-by", "generated-by", "ai-assisted-by", "ai-agent"):
+            return "ai", "Other assistant"
+    for m in _GENERATED.finditer(message):
+        tool = _tool_in(m.group(1))
+        if tool:
+            return "ai", tool
+    for ident in (author, committer):
+        if ident and _AGENT_IDENTITY.search(ident):
+            return "ai", _tool_in(ident) or "Other assistant"
+    if re.search(r"noreply@anthropic\.com", message, re.I):
+        return "ai", "Claude"
+    if re.search(r"^aider: ", message, re.I | re.M):
+        return "ai", "Aider"
+    if re.search(r"\bai-generated\b", message, re.I):
+        return "ai", "Other assistant"
+    for rx in extra or ():
+        if rx.search(message) or rx.search(author) or rx.search(committer):
+            return "ai", "Custom pattern"
+    return "human", None
 
 
 def _patterns() -> list[re.Pattern]:
-    extra = [p for p in os.environ.get("JUSTIFY_AI_PATTERNS", "").split("||") if p.strip()]
-    return [re.compile(p, re.I) for p in DEFAULT_PATTERNS + extra]
+    return [re.compile(p, re.I) for p in os.environ.get("JUSTIFY_AI_PATTERNS", "").split("||") if p.strip()]
 
 
 def _git(root: pathlib.Path, *args: str) -> str | None:
@@ -51,12 +118,13 @@ class Attribution:
     def __init__(self, root: pathlib.Path):
         self.root = root
         top = _git(root, "rev-parse", "--show-toplevel")
-        tracked = _git(root, "ls-files", "--", "*.py") if top else None
+        tracked = _git(root, "ls-files", "--", ".") if top else None
         # a folder inside some other repository (a home directory under git, say) is not
-        # attributed unless its own Python files are tracked
+        # attributed unless its own files are tracked
         self.enabled = bool(top and tracked and tracked.strip())
         self.top = pathlib.Path(top.strip()) if top else None
         self._commit_kind: dict[str, str] = {}
+        self._commit_tool: dict[str, str] = {}
         self._commit_time: dict[str, int] = {}
         self._blame: dict[str, list[str]] = {}        # rel -> commit sha of every line
         self.pats = _patterns()
@@ -66,24 +134,29 @@ class Attribution:
         the difference between seconds and minutes on a repository with thousands of commits."""
         if self._commit_kind:
             return
-        out = _git(self.root, "log", "--all", "--format=%H%x00%ct%x00%B%x00%an <%ae>%x01") or ""
+        out = _git(self.root, "log", "--all", "--format=%H%x00%ct%x00%an <%ae>%x00%cn <%ce>%x00%B%x01") or ""
         for entry in out.split("\x01"):
             entry = entry.strip("\n")
             if not entry:
                 continue
-            sha, _, rest = entry.partition("\x00")
-            when, _, rest = rest.partition("\x00")
+            sha, when, author, committer, message = (entry.split("\x00", 4) + ["", "", "", ""])[:5]
             sha = sha.strip()
-            self._commit_kind[sha] = "ai" if any(p.search(rest) for p in self.pats) else "human"
+            self._remember(sha, *classify(message, author, committer, self.pats))
             self._commit_time[sha] = int(when) if when.isdigit() else 0
+
+    def _remember(self, sha: str, kind: str, tool: str | None) -> None:
+        self._commit_kind[sha] = kind
+        if tool:
+            self._commit_tool[sha] = tool
 
     def _kind_of(self, sha: str) -> str:
         if sha.startswith("0000000"):
             return "uncommitted"
         self._load_all_commits()
         if sha not in self._commit_kind:      # e.g. a shallow clone's boundary commit
-            msg = _git(self.root, "show", "-s", "--format=%B%n%an <%ae>", sha) or ""
-            self._commit_kind[sha] = "ai" if any(p.search(msg) for p in self.pats) else "human"
+            out = _git(self.root, "show", "-s", "--format=%an <%ae>%x00%cn <%ce>%x00%B", sha) or ""
+            author, committer, message = (out.split("\x00", 2) + ["", ""])[:3]
+            self._remember(sha, *classify(message, author, committer, self.pats))
         return self._commit_kind[sha]
 
     def _file_shas(self, rel: str) -> list[str]:
@@ -180,6 +253,40 @@ class Attribution:
             res[kind] = {"added": a, "surviving": sv,
                          "rewritten_percent": round(100.0 * (a - sv) / a, 1) if a else None}
         return res
+
+    def tools(self) -> dict[str, int]:
+        """Which assistants signed the commits on the current branch, and how many each."""
+        out = _git(self.root, "log", "--format=%H")
+        if not out:
+            return {}
+        self._load_all_commits()
+        c = Counter(self._commit_tool[s] for s in out.split() if s in self._commit_tool)
+        return dict(c.most_common())
+
+    def history_shape(self) -> dict | None:
+        """How the code arrived. When one commit added most of what is there, the history cannot
+        say how it was written — whoever or whatever wrote it — and the page should say so plainly
+        rather than report "100% human"."""
+        out = _git(self.root, "log", "HEAD", "--no-merges", "--numstat", "--format=%x01%H")
+        if not out:
+            return None
+        added: list[int] = []
+        for c in out.split("\x01"):
+            if not c.strip():
+                continue
+            n = 0
+            for row in c.split("\n")[1:]:
+                parts = row.split("\t")
+                if len(parts) == 3 and parts[0].isdigit():
+                    n += int(parts[0])
+            added.append(n)
+        total = sum(added)
+        if not added or not total:
+            return None
+        biggest = max(added)
+        return {"commits": len(added), "lines_added": total, "largest_commit_lines": biggest,
+                "largest_commit_percent": round(100.0 * biggest / total, 1),
+                "thin": len(added) <= 2 or biggest / total >= 0.8}
 
     def ai_commits(self) -> tuple[int, int]:
         out = _git(self.root, "log", "--format=%H")

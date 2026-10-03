@@ -14,6 +14,8 @@ from .model import REMOVE, SIMPLIFY
 def _print_summary(res) -> None:
     m = res.metrics
     print(f"\n{NAME}  ·  {res.root}")
+    if res.languages:
+        print("  Made of   " + ", ".join(f"{l['name']} {l['lines']:,}" for l in res.languages[:6]) + " lines")
     print(f"  Stage 1  {res.files} Python files, {res.lines:,} lines, each hashed"
           + (f" ({len(res.unparsed)} could not be parsed)" if res.unparsed else ""))
     print("  Stage 2  syntax trees parsed; imports, definitions and references collected")
@@ -55,14 +57,25 @@ def _print_summary(res) -> None:
             loc = f"{f.file}:{f.line}"
             print(f"  {'KEEP':<8} {f.kind:<10} {loc:<34} {f.name:<22} proof: {f.proof[:64]}")
     print()
-    print(f"  Justified Line Ratio  {m['jlr_percent']}%   ·   dead weight {m['dead_weight_lines']} lines "
-          f"({m['per_1000_lines']} per 1,000)   ·   duplicate lines {m['duplicate_lines']}")
+    if m["jlr_percent"] is None:
+        print("  Justified Line Ratio  n/a — no Python to audit for dead code; other languages checked for copies")
+    else:
+        print(f"  Justified Line Ratio  {m['jlr_percent']}%   ·   dead weight {m['dead_weight_lines']} lines "
+              f"({m['per_1000_lines']} per 1,000)   ·   duplicate lines {m['duplicate_lines']}")
     a = m.get("attribution")
     if a:
-        print(f"  Written by            AI-assisted {a['ai_lines']:,} lines ({a['ai_commits']} of {a['commits']} commits), "
-              f"human {a['human_lines']:,} lines")
-        print(f"  Dead weight / 1,000   AI-assisted {a['ai_dead_per_1000']}   ·   human {a['human_dead_per_1000']}"
-              + (f"   ·   ratio {a['ai_to_human_ratio']}×" if a["ai_to_human_ratio"] is not None else ""))
+        code = a.get("all_code") or {"ai_lines": a["ai_lines"], "human_lines": a["human_lines"]}
+        print(f"  Written by            AI-signed commits {code['ai_lines']:,} lines ({a['ai_commits']} of {a['commits']} "
+              f"commits), no AI trace {code['human_lines']:,} lines")
+        if a.get("tools"):
+            print("  Assistants            " + ", ".join(f"{k} {v}" for k, v in a["tools"].items()))
+        h = a.get("history") or {}
+        if h.get("thin"):
+            print(f"  History               thin: {h['commits']} commit(s), the largest added {h['largest_commit_percent']}% "
+                  "of all lines — it cannot show how this code was written")
+        if m["jlr_percent"] is not None:
+            print(f"  Dead weight / 1,000   AI-assisted {a['ai_dead_per_1000']}   ·   human {a['human_dead_per_1000']}"
+                  + (f"   ·   ratio {a['ai_to_human_ratio']}×" if a["ai_to_human_ratio"] is not None else ""))
         if a.get("ai_dup_per_1000") is not None or a.get("human_dup_per_1000") is not None:
             print(f"  Duplicates / 1,000    AI-assisted {a.get('ai_dup_per_1000')}   ·   human {a.get('human_dup_per_1000')}")
         rw = a.get("rework")

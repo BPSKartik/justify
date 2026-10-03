@@ -4,8 +4,11 @@ Scan jobs: a small queue, a job store, and a cache.
 A scan of a large repository takes tens of seconds, so a request starts a job and the page
 (or the MCP tool) polls it. Each scan runs as its own process, with a scrubbed environment,
 a wall-clock limit and a memory limit, so one pathological repository cannot take the
-service down. The same commit is never scanned twice: results are cached by
-(repository, commit, Justify version).
+service down. The same commit is never scanned twice: results of public repositories are
+cached by (repository, commit, Justify version), and opening a cached result costs no quota.
+
+Two kinds of job: a public GitHub repository (cloned here, result public), and code a
+signed-in person uploaded (never cloned, never cached for anyone else, result private).
 """
 
 from __future__ import annotations
@@ -25,17 +28,9 @@ import time
 from datetime import datetime, timezone
 
 from .. import __version__
+from .db import Database
 from .fetch import FetchError, RepoRef, clone, resolve
-
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS scans (
-    id TEXT PRIMARY KEY, repo TEXT NOT NULL, url TEXT, ref TEXT, sha TEXT, version TEXT,
-    status TEXT NOT NULL, stage TEXT, created REAL, started REAL, finished REAL,
-    error TEXT, error_code TEXT, result TEXT, client TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_cache ON scans(repo, sha, version, status);
-CREATE INDEX IF NOT EXISTS idx_status ON scans(status, created);
-"""
+from .storage import Results
 
 ACTIVE = ("queued", "cloning", "scanning")
 
@@ -44,22 +39,51 @@ def _iso(t: float | None) -> str | None:
     return datetime.fromtimestamp(t, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if t else None
 
 
+def summarize(result: dict) -> dict:
+    """The few numbers a history list, a dashboard and a comparison need — kept in the database,
+    so none of them has to open a full result."""
+    m = result.get("metrics") or {}
+    a = m.get("attribution") or {}
+    code = a.get("all_code") or {}
+    ai = code.get("ai_lines", a.get("ai_lines", 0)) or 0
+    human = code.get("human_lines", a.get("human_lines", 0)) or 0
+    counts: dict[str, int] = {}
+    for f in result.get("findings", []):
+        counts[f.get("verdict", "")] = counts.get(f.get("verdict", ""), 0) + 1
+    langs = result.get("languages") or []
+    code_langs = [l for l in langs if l.get("audit") in ("full", "copies")]
+    return {
+        "files": result.get("files"), "lines": result.get("lines"),
+        "jlr": m.get("jlr_percent"), "dead_lines": m.get("dead_weight_lines"), "dead_units": m.get("dead_weight_units"),
+        "dup_lines": m.get("duplicate_lines"), "per_1000": m.get("per_1000_lines"),
+        "remove": counts.get("REMOVE", 0), "simplify": counts.get("SIMPLIFY", 0), "ambiguous": counts.get("AMBIGUOUS", 0),
+        "ai_lines": ai, "human_lines": human,
+        "ai_share": round(100.0 * ai / (ai + human), 1) if (ai + human) else None,
+        "ai_commits": a.get("ai_commits"), "commits": a.get("commits"),
+        "tools": a.get("tools") or {}, "thin_history": bool((a.get("history") or {}).get("thin")),
+        "traced": bool(a),
+        "languages": [{"name": l["name"], "lines": l["lines"]} for l in langs[:5]],
+        "code_lines": sum(l["lines"] for l in code_langs),
+    }
+
+
 class Jobs:
     def __init__(self, data_dir: str, workers: int = 2, queue_max: int = 30, scan_timeout: int = 600,
-                 clone_timeout: int = 180, max_mb: int = 400, scan_mem_mb: int = 3072):
+                 clone_timeout: int = 180, max_mb: int = 400, scan_mem_mb: int = 3072,
+                 db: Database | None = None, results: Results | None = None):
         self.dir = data_dir
         os.makedirs(os.path.join(data_dir, "work"), exist_ok=True)
-        self.db_path = os.path.join(data_dir, "jobs.sqlite3")
+        os.makedirs(os.path.join(data_dir, "uploads"), exist_ok=True)
+        self.database = db or Database(os.path.join(data_dir, "justify.sqlite3"))
+        self.results = results or Results(os.path.join(data_dir, "results"))
+        self.db_path = self.database.path
         self.queue_max, self.scan_timeout = queue_max, scan_timeout
         self.clone_timeout, self.max_mb, self.scan_mem_mb = clone_timeout, max_mb, scan_mem_mb
-        self.lock = threading.Lock()
         self.q: queue.Queue[str] = queue.Queue()
-        with self._db() as db:
-            db.executescript(SCHEMA)
-            # a restart loses the queue: say so rather than leave jobs spinning forever
-            db.execute("UPDATE scans SET status='failed', error=?, error_code='interrupted', finished=? "
-                       "WHERE status IN ('queued','cloning','scanning')",
-                       ("The service restarted during this scan. Start it again.", time.time()))
+        # a restart loses the queue: say so rather than leave jobs spinning forever
+        self.database.write("UPDATE scans SET status='failed', error=?, error_code='interrupted', finished=? "
+                            "WHERE status IN ('queued','cloning','scanning')",
+                            ("The service restarted during this scan. Start it again.", time.time()))
         self.clone_fn = clone            # tests replace these with local fixtures
         self.resolve_fn = resolve
         self.scan_argv = lambda repo_dir: [sys.executable, "-m", "justify.cli", "scan", repo_dir, "--json",
@@ -70,87 +94,137 @@ class Jobs:
     # ------------------------------------------------------------------ store
 
     def _db(self) -> sqlite3.Connection:
-        db = sqlite3.connect(self.db_path, timeout=30, isolation_level=None)
-        db.row_factory = sqlite3.Row
-        return db
+        return self.database.connect()
 
     def _update(self, job_id: str, **fields) -> None:
         cols = ", ".join(f"{k}=?" for k in fields)
-        with self.lock, self._db() as db:
-            db.execute(f"UPDATE scans SET {cols} WHERE id=?", (*fields.values(), job_id))
+        self.database.write(f"UPDATE scans SET {cols} WHERE id=?", (*fields.values(), job_id))
 
-    def get(self, job_id: str, with_result: bool = True) -> dict | None:
-        with self._db() as db:
-            row = db.execute("SELECT * FROM scans WHERE id=?", (job_id,)).fetchone()
-            if not row:
-                return None
-            position = 0
-            if row["status"] == "queued":
-                position = db.execute("SELECT COUNT(*) FROM scans WHERE status='queued' AND created < ?",
-                                      (row["created"],)).fetchone()[0]
+    def row(self, job_id: str) -> sqlite3.Row | None:
+        return self.database.one("SELECT * FROM scans WHERE id=?", (job_id,))
+
+    def get(self, job_id: str, with_result: bool = True, viewer: str | None = None) -> dict | None:
+        """A scan as the API shows it. A private scan is visible to its owner only; to anyone
+        else it does not exist."""
+        row = self.row(job_id)
+        if not row or (row["visibility"] == "private" and viewer != row["owner"]):
+            return None
+        position = 0
+        if row["status"] == "queued":
+            position = self.database.one("SELECT COUNT(*) AS n FROM scans WHERE status='queued' AND created < ?",
+                                         (row["created"],))["n"]
         return self._public(row, position, with_result)
 
     def _public(self, row: sqlite3.Row, position: int = 0, with_result: bool = True) -> dict:
         started, finished = row["started"], row["finished"]
+        result = self.results.get(row["id"]) if (with_result and row["status"] == "done") else None
         return {
-            "id": row["id"], "repo": row["repo"], "url": row["url"], "ref": row["ref"], "sha": row["sha"],
-            "status": row["status"], "position": position,
+            "id": row["id"], "kind": row["kind"], "repo": row["repo"], "url": row["url"], "ref": row["ref"],
+            "sha": row["sha"], "status": row["status"], "position": position,
+            "private": row["visibility"] == "private",
             "stage": json.loads(row["stage"]) if row["stage"] else None,
             "created": _iso(row["created"]), "started": _iso(started), "finished": _iso(finished),
             "duration_s": round(finished - started, 1) if (started and finished) else None,
             "error": row["error"], "error_code": row["error_code"],
-            "result": json.loads(row["result"]) if (with_result and row["result"]) else None,
+            "summary": json.loads(row["summary"]) if row["summary"] else None,
+            "result": result,
         }
 
     def recent(self, limit: int = 12) -> list[dict]:
-        with self._db() as db:
-            rows = db.execute("SELECT id, repo, sha, finished, result FROM scans WHERE status='done' "
-                              "ORDER BY finished DESC LIMIT 200").fetchall()
+        rows = self.database.all("SELECT id, repo, sha, finished, summary FROM scans WHERE status='done' "
+                                 "AND visibility='public' AND kind='github' ORDER BY finished DESC LIMIT 200")
         out, seen = [], set()
         for r in rows:
             if r["repo"].lower() in seen:
                 continue
             seen.add(r["repo"].lower())
-            res = json.loads(r["result"])
-            m, a = res.get("metrics", {}), (res.get("metrics", {}).get("attribution") or {})
-            ai, human = a.get("ai_lines") or 0, a.get("human_lines") or 0
+            s = json.loads(r["summary"]) if r["summary"] else {}
             out.append({"id": r["id"], "repo": r["repo"], "sha": r["sha"], "finished": _iso(r["finished"]),
-                        "jlr_percent": m.get("jlr_percent"), "files": res.get("files"), "lines": res.get("lines"),
-                        "ai_share_percent": round(100.0 * ai / (ai + human), 1) if (ai + human) else None})
+                        "jlr_percent": s.get("jlr"), "files": s.get("files"), "lines": s.get("lines"),
+                        "code_lines": s.get("code_lines"), "languages": s.get("languages", [])[:3],
+                        "ai_share_percent": s.get("ai_share")})
             if len(out) >= limit:
                 break
         return out
 
     def counts(self) -> dict:
-        with self._db() as db:
-            q = db.execute("SELECT COUNT(*) FROM scans WHERE status='queued'").fetchone()[0]
-            r = db.execute("SELECT COUNT(*) FROM scans WHERE status IN ('cloning','scanning')").fetchone()[0]
+        q = self.database.one("SELECT COUNT(*) AS n FROM scans WHERE status='queued'")["n"]
+        r = self.database.one("SELECT COUNT(*) AS n FROM scans WHERE status IN ('cloning','scanning')")["n"]
         return {"queue": q, "running": r}
+
+    def audits_of(self, repo: str, owner: str | None = None, limit: int = 30) -> list[dict]:
+        """Finished audits of one repository, newest first — what a comparison is drawn from."""
+        rows = self.database.all("SELECT id, sha, finished, summary, visibility, owner FROM scans WHERE lower(repo)=lower(?) "
+                                 "AND status='done' ORDER BY finished DESC LIMIT ?", (repo, limit * 3))
+        out, seen = [], set()
+        for r in rows:
+            if r["visibility"] == "private" and r["owner"] != owner:
+                continue
+            if r["sha"] and r["sha"] in seen:
+                continue
+            seen.add(r["sha"])
+            out.append({"id": r["id"], "sha": r["sha"], "finished": _iso(r["finished"]),
+                        "summary": json.loads(r["summary"]) if r["summary"] else None})
+            if len(out) >= limit:
+                break
+        return out
+
+    def delete_private(self, job_id: str, owner: str) -> bool:
+        row = self.row(job_id)
+        if not row or row["visibility"] != "private" or row["owner"] != owner or row["status"] in ACTIVE:
+            return False
+        self.database.write("DELETE FROM scans WHERE id=?", (job_id,))
+        self.results.delete(job_id)
+        return True
 
     # ------------------------------------------------------------------ submit
 
-    def submit(self, rr: RepoRef, client: str = "") -> tuple[dict, bool]:
-        """Returns (scan, is_new). Resolves the commit first so a cached scan answers instantly."""
+    def submit(self, rr: RepoRef, client: str = "", owner: str | None = None, charge=None) -> tuple[dict, bool]:
+        """Returns (scan, is_new). Resolves the commit first so a cached scan answers instantly.
+        `charge(tx)` is called only when a new scan is about to be queued, inside the same
+        transaction, and may refuse it by raising."""
         sha, branch = self.resolve_fn(rr)
         slug = rr.slug
-        with self.lock, self._db() as db:
-            done = db.execute("SELECT * FROM scans WHERE lower(repo)=lower(?) AND sha=? AND version=? AND "
-                              "status='done' ORDER BY finished DESC LIMIT 1", (slug, sha, __version__)).fetchone()
-            if done:
-                return self._public(done), False
-            running = db.execute("SELECT * FROM scans WHERE lower(repo)=lower(?) AND sha=? AND status IN "
-                                 "('queued','cloning','scanning') LIMIT 1", (slug, sha)).fetchone()
-            if running:
-                return self._public(running, with_result=False), False
-            queued = db.execute("SELECT COUNT(*) FROM scans WHERE status='queued'").fetchone()[0]
+        with self.database.transaction() as tx:
+            done = tx.execute("SELECT * FROM scans WHERE lower(repo)=lower(?) AND sha=? AND version=? AND "
+                              "status='done' AND visibility='public' ORDER BY finished DESC LIMIT 1",
+                              (slug, sha, __version__)).fetchone()
+            running = None if done else tx.execute(
+                "SELECT * FROM scans WHERE lower(repo)=lower(?) AND sha=? AND visibility='public' AND status IN "
+                "('queued','cloning','scanning') LIMIT 1", (slug, sha)).fetchone()
+            if not done and not running:
+                queued = tx.execute("SELECT COUNT(*) FROM scans WHERE status='queued'").fetchone()[0]
+                if queued >= self.queue_max:
+                    raise FetchError("The scanner is busy right now. Try again in a few minutes.", 503, "busy")
+                if charge:
+                    charge(tx)
+                job_id = "s_" + secrets.token_hex(5)
+                tx.execute("INSERT INTO scans (id, kind, repo, url, ref, sha, version, status, created, client, owner) "
+                           "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                           (job_id, "github", slug, rr.url, branch, sha, __version__, "queued", time.time(), client, owner))
+        if done:
+            return self._public(done), False
+        if running:
+            return self._public(running, with_result=False), False
+        self.q.put(job_id)
+        return self.get(job_id, viewer=owner), True
+
+    def submit_upload(self, src_dir: str, name: str, owner: str, client: str = "", charge=None) -> dict:
+        """Queue code someone uploaded. It was already unpacked into `src_dir`, which this job
+        now owns and deletes when it finishes."""
+        with self.database.transaction() as tx:
+            queued = tx.execute("SELECT COUNT(*) FROM scans WHERE status='queued'").fetchone()[0]
             if queued >= self.queue_max:
                 raise FetchError("The scanner is busy right now. Try again in a few minutes.", 503, "busy")
+            if charge:
+                charge(tx)
             job_id = "s_" + secrets.token_hex(5)
-            db.execute("INSERT INTO scans (id, repo, url, ref, sha, version, status, created, client) "
-                       "VALUES (?,?,?,?,?,?,?,?,?)",
-                       (job_id, slug, rr.url, branch, sha, __version__, "queued", time.time(), client))
+            tx.execute("INSERT INTO scans (id, kind, repo, version, status, created, client, owner, visibility, src) "
+                       "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                       (job_id, "upload", f"upload/{name}", __version__, "queued", time.time(), client, owner,
+                        "private", src_dir))
         self.q.put(job_id)
-        return self.get(job_id), True
+        return self.get(job_id, viewer=owner)
 
     # ------------------------------------------------------------------ work
 
@@ -165,39 +239,54 @@ class Jobs:
                 print(json.dumps({"event": "scan_crashed", "id": job_id, "error": repr(exc)[:300]}), flush=True)
 
     def _run(self, job_id: str) -> None:
-        job = self.get(job_id, with_result=False)
-        if not job or job["status"] != "queued":
+        row = self.row(job_id)
+        if not row or row["status"] != "queued":
             return
-        owner, name = job["repo"].split("/", 1)
-        rr = RepoRef(owner, name)
         work = tempfile.mkdtemp(prefix=f"{job_id}-", dir=os.path.join(self.dir, "work"))
         started = time.time()
         try:
-            self._update(job_id, status="cloning", started=started,
-                         stage=json.dumps({"stage": "clone", "message": "downloading the repository and its history"}))
-            dest = os.path.join(work, name)
-            sha = self.clone_fn(rr, job["ref"], dest, self.clone_timeout, self.max_mb) or job["sha"]
-            self._update(job_id, status="scanning", sha=sha,
-                         stage=json.dumps({"stage": "ingest", "message": "reading every Python file"}))
+            if row["kind"] == "upload":
+                dest = row["src"]
+                if not dest or not os.path.isdir(dest):
+                    raise FetchError("The uploaded files are gone — the service restarted. Upload them again.",
+                                     410, "upload_gone")
+                sha = None
+                self._update(job_id, status="scanning", started=started,
+                             stage=json.dumps({"stage": "ingest", "message": "reading the uploaded files"}))
+            else:
+                owner, name = row["repo"].split("/", 1)
+                rr = RepoRef(owner, name)
+                self._update(job_id, status="cloning", started=started,
+                             stage=json.dumps({"stage": "clone", "message": "downloading the repository and its history"}))
+                dest = os.path.join(work, name)
+                sha = self.clone_fn(rr, row["ref"], dest, self.clone_timeout, self.max_mb) or row["sha"]
+                self._update(job_id, status="scanning", sha=sha,
+                             stage=json.dumps({"stage": "ingest", "message": "reading every file"}))
             result = self._scan(job_id, dest, work)
-            result["root"] = job["repo"]
-            result["github_blob_base"] = f"https://github.com/{job['repo']}/blob/{sha}/"
-            result["sha"] = sha
-            self._update(job_id, status="done", finished=time.time(), result=json.dumps(result),
-                         stage=json.dumps({"stage": "done", "message": "audit complete"}))
-            print(json.dumps({"event": "scan_done", "id": job_id, "repo": job["repo"], "files": result.get("files"),
-                              "lines": result.get("lines"), "seconds": round(time.time() - started, 1)}), flush=True)
+            result["root"] = row["repo"]
+            if row["kind"] == "github":
+                result["github_blob_base"] = f"https://github.com/{row['repo']}/blob/{sha}/"
+                result["sha"] = sha
+            self.results.put(job_id, result)
+            self._update(job_id, status="done", finished=time.time(), summary=json.dumps(summarize(result)),
+                         stage=json.dumps({"stage": "done", "message": "audit complete"}), src=None)
+            print(json.dumps({"event": "scan_done", "id": job_id, "kind": row["kind"],
+                              "repo": row["repo"] if row["kind"] == "github" else "(upload)",
+                              "files": result.get("files"), "lines": result.get("lines"),
+                              "seconds": round(time.time() - started, 1)}), flush=True)
         except FetchError as exc:
-            self._update(job_id, status="failed", finished=time.time(), error=str(exc), error_code=exc.code)
+            self._update(job_id, status="failed", finished=time.time(), error=str(exc), error_code=exc.code, src=None)
         finally:
             shutil.rmtree(work, ignore_errors=True)
+            if row["kind"] == "upload" and row["src"]:
+                shutil.rmtree(row["src"], ignore_errors=True)
 
     def _scan(self, job_id: str, repo_dir: str, work: str) -> dict:
         home = os.path.join(work, "home")
         os.makedirs(home, exist_ok=True)
         env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": home, "LANG": "C.UTF-8",
                "JUSTIFY_HOME": os.path.join(home, ".justify"), "PYTHONDONTWRITEBYTECODE": "1",
-               "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0"}
+               "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull, "GIT_TERMINAL_PROMPT": "0"}
         out_path = os.path.join(work, "result.json")
         limit = self.scan_mem_mb * 1_048_576
 
