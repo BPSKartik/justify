@@ -19,6 +19,7 @@ The model is never trusted on its word:
 from __future__ import annotations
 
 from .facts import RepoFacts
+import re
 from concurrent.futures import ThreadPoolExecutor
 
 from .llm import Jury, Model, ModelError
@@ -50,12 +51,16 @@ def _vote(model: Model, rf: RepoFacts, f: Finding, ctx: str) -> dict:
         j = model.ask(JUSTIFY_SYSTEM, ctx)
     except ModelError as exc:
         return {"model": model.name, "error": str(exc)[:200]}
+    verdict = str(j.get("verdict", "")).strip().lower()
+    if verdict not in ("keep", "remove"):
+        # an answer outside the format is no vote at all — not a quiet "keep"
+        return {"model": model.name, "error": f"answered off-format: {str(j)[:120]}"}
     ok, bad = _check_evidence(rf, f, j.get("evidence"))
     try:
         conf = float(j.get("confidence", 0))
     except (TypeError, ValueError):
         conf = 0.0
-    return {"model": model.name, "verdict": str(j.get("verdict", "keep")).lower(), "confidence": conf,
+    return {"model": model.name, "verdict": verdict, "confidence": conf,
             "reason": j.get("reason"), "evidence_checked": ok, "evidence_rejected": bad,
             "seconds": getattr(model, "seconds", None)}
 
@@ -131,9 +136,14 @@ def _context(rf: RepoFacts, f: Finding, max_lines: int = 40) -> str:
 
 
 def _check_evidence(rf: RepoFacts, f: Finding, evidence) -> tuple[list[str], list[str]]:
+    """Evidence is a file:line that names the unit — as a whole word, outside the unit's own
+    lines (the line `import io` sits on is not evidence that io is used), and, for an import,
+    in the same file (an import is only ever used by the file that makes it). A model citing
+    anything else has invented it."""
     ok, rejected = [], []
     texts = {rel: ff.src.source_lines for rel, ff in rf.files.items()}
     texts.update({rel: t.split("\n") for rel, t in rf.other})
+    word = re.compile(rf"(?<![A-Za-z0-9_]){re.escape(f.name)}(?![A-Za-z0-9_])")
     for item in (evidence or [])[:10]:
         item = str(item).strip()
         rel, _, num = item.rpartition(":")
@@ -143,7 +153,9 @@ def _check_evidence(rf: RepoFacts, f: Finding, evidence) -> tuple[list[str], lis
             rejected.append(item)
             continue
         src = texts.get(rel)
-        if src and 1 <= n <= len(src) and f.name in src[n - 1]:
+        own = rel == f.file and f.line <= n <= f.end_line
+        elsewhere = f.kind == "import" and rel != f.file
+        if src and 1 <= n <= len(src) and not own and not elsewhere and word.search(src[n - 1]):
             ok.append(item)
         else:
             rejected.append(item)

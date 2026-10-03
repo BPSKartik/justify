@@ -15,7 +15,7 @@ from .candidates import find_candidates
 from .facts import repo_facts
 from .ingest import ingest
 from .judge import judge
-from .llm import Model
+from .llm import Jury, Model
 from .model import KEEP, REMOVE, SIMPLIFY, Finding
 from .proof import prove
 
@@ -166,7 +166,20 @@ def run(root: str | pathlib.Path, *, model: Model | None = None, prove_command: 
 
     proof = None
     if prove_command:                                         # stage 6
+        # a jury is graded on everything the graph flagged: removals it kept are proved too, in the
+        # copy, so a wrong "keep" shows up on the scoreboard — but the jury's KEEP still stands
+        grade_only = []
+        if isinstance(model, Jury):
+            for f in findings:
+                if f.verdict == REMOVE and f.final == KEEP and f.kind in ("import", "function", "class") \
+                        and f.proof == "not run":
+                    f.final = REMOVE
+                    grade_only.append(f)
         proof = prove(root, findings, prove_command)
+        for f in grade_only:
+            f.final = KEEP
+        if grade_only:
+            proof["proved_for_grading_only"] = len(grade_only)
         for f in findings:                # asked for proof: only a removal that passed may go
             if f.final == REMOVE and f.kind in ("import", "function", "class") and f.proof != "passed":
                 f.final = KEEP

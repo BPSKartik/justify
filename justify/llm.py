@@ -93,11 +93,17 @@ class _HttpChat(Model):
     def __init__(self, url: str, headers: dict, model: str | None, name: str, auth=None):
         self.url, self.headers, self.model, self.name, self.auth = url, headers, model, name, auth
         self.timeout = int(os.environ.get("JUSTIFY_MODEL_TIMEOUT_S") or 90)
-        reasoning = bool(re.match(r"(gpt-5|o\d)", (model or "").lower()))
+        low = (model or "").lower()
         # optional knobs: a model that rejects one by name gets the request again without it
-        self.options: dict = ({"max_completion_tokens": 2500, "reasoning_effort": "low"} if reasoning
-                              else {"max_tokens": 2500, "temperature": 0})
-        self.options["response_format"] = {"type": "json_object"}
+        if re.match(r"(gpt-5|o\d)", low):
+            self.options: dict = {"max_completion_tokens": 2500, "reasoning_effort": "low",
+                                  "response_format": {"type": "json_object"}}
+        elif "reasoning" in low or "gpt-oss" in low or "r1" in low:
+            # thinking models write their reasoning first; forcing JSON mode makes them stuff
+            # it inside the JSON and run out of room — let them think, then read the JSON
+            self.options = {"max_tokens": 6000}
+        else:
+            self.options = {"max_tokens": 2500, "temperature": 0, "response_format": {"type": "json_object"}}
         self.seconds = 0.0
 
     def _post(self, body: dict) -> dict:
