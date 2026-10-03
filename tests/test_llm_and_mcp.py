@@ -215,3 +215,10 @@ def test_broken_model_json_is_a_model_error_not_a_crash():
         with pytest.raises(ModelError):
             _extract_json(bad)
     assert _extract_json('<think>maybe {not}</think>\n{"verdict": "keep"}') == {"verdict": "keep"}
+
+
+def test_the_last_complete_json_object_is_the_answer():
+    from justify.llm import _extract_json
+    text = ('thinking... maybe {"verdict": "keep"} no wait. {"verdict": "remove", "reason": "a {brace} in a string", '
+            '"evidence": [], "confidence": 0.9}. I will now produce final JSON.{"verdict": "remove", "confidence": 0.95}')
+    assert _extract_json(text) == {"verdict": "remove", "confidence": 0.95}

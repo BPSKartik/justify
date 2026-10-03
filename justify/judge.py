@@ -19,7 +19,9 @@ The model is never trusted on its word:
 from __future__ import annotations
 
 from .facts import RepoFacts
+import io
 import re
+import tokenize
 from concurrent.futures import ThreadPoolExecutor
 
 from .llm import Jury, Model, ModelError
@@ -135,6 +137,18 @@ def _context(rf: RepoFacts, f: Finding, max_lines: int = 40) -> str:
             f"CODE:\n{code}")
 
 
+def _code_names(line: str) -> set[str]:
+    """Identifiers a line of Python actually uses — not words inside its strings or comments.
+    request.args.get("date") does not use the date import, and a model that says it does has
+    fallen for the same trap a text search falls for."""
+    try:
+        return {t.string for t in tokenize.generate_tokens(io.StringIO(line + "\n").readline)
+                if t.type == tokenize.NAME}
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        stripped = re.sub(r"(\"\"\"|\'\'\'|\"|\').*?\1", "", line.split("#", 1)[0])
+        return set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", stripped))
+
+
 def _check_evidence(rf: RepoFacts, f: Finding, evidence) -> tuple[list[str], list[str]]:
     """Evidence is a file:line that names the unit — as a whole word, outside the unit's own
     lines (the line `import io` sits on is not evidence that io is used), and, for an import,
@@ -155,7 +169,19 @@ def _check_evidence(rf: RepoFacts, f: Finding, evidence) -> tuple[list[str], lis
         src = texts.get(rel)
         own = rel == f.file and f.line <= n <= f.end_line
         elsewhere = f.kind == "import" and rel != f.file
-        if src and 1 <= n <= len(src) and not own and not elsewhere and word.search(src[n - 1]):
+        if not src or not 1 <= n <= len(src) or own or elsewhere:
+            rejected.append(item)
+            continue
+        line = src[n - 1]
+        ff = rf.files.get(rel)
+        # strings count only where names really are reached through strings: a unit the graph
+        # left undecided, or a file that uses getattr / globals() / importlib
+        by_string = f.verdict == AMBIGUOUS or bool(ff and (ff.dynamic or ff.dynamic_globals))
+        if rel.endswith(".py") and not by_string:
+            named = f.name in _code_names(line)
+        else:
+            named = bool(word.search(line))
+        if named:
             ok.append(item)
         else:
             rejected.append(item)

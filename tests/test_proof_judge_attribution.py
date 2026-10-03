@@ -294,3 +294,11 @@ def test_a_jury_keep_is_graded_but_still_stands(make_repo):
     assert io.final == "KEEP" and io.proof == "passed"                       # proved removable, still kept
     assert res.judging["scoreboard"]["m1"] == {"right": 0, "wrong": 1}        # and the keep voters lose a point
     assert res.proof["proved_for_grading_only"] == 1
+
+
+def test_a_word_inside_a_string_is_not_evidence(make_repo):
+    # the trap a text search falls for: "date" in a string is not a use of the date import
+    root = make_repo({"app.py": "from datetime import date\ndef day(args):\n    return args.get('date')  # date\nday({})\n"})
+    m = Scripted({"verdict": "keep", "reason": "used", "evidence": ["app.py:3"], "confidence": 0.9}, {})
+    j = next(f for f in run(root, model=m, record=False).findings if f.name == "date").judgement
+    assert "app.py:3" in j["evidence_rejected"] and not j["evidence_checked"]

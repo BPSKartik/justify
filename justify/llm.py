@@ -65,17 +65,45 @@ def _extract_json(text: str) -> dict:
     try:
         out = json.loads(text)
     except json.JSONDecodeError:
-        m = re.search(r"\{.*\}", text, re.S)
-        if not m:
+        # a thinking model may draft the object several times; its last complete one is the answer
+        candidates = _json_objects(text)
+        if not candidates:
+            if "{" in text:     # truncated or malformed: that juror's answer is void, the run goes on
+                raise ModelError(f"model answered with broken JSON: {text[:120]!r}") from None
             raise ModelError(f"model did not answer in JSON: {text[:160]!r}") from None
-        try:
-            out = json.loads(m.group(0))
-        except json.JSONDecodeError:
-            # truncated or malformed: that juror's answer is void, the run goes on
-            raise ModelError(f"model answered with broken JSON: {text[:120]!r}") from None
+        out = candidates[-1]
     if not isinstance(out, dict):
         raise ModelError(f"model answered JSON that is not an object: {text[:120]!r}")
     return out
+
+
+def _json_objects(text: str) -> list[dict]:
+    """Every balanced {...} in the text that parses as a JSON object, in order."""
+    found, depth, start, in_str, esc = [], 0, None, False, False
+    for i, ch in enumerate(text):
+        if in_str:
+            esc = (ch == "\\") and not esc
+            if ch == '"' and not esc:
+                in_str = False
+            elif ch != "\\":
+                esc = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "}" and depth:
+            depth -= 1
+            if depth == 0 and start is not None:
+                try:
+                    obj = json.loads(text[start:i + 1])
+                    if isinstance(obj, dict):
+                        found.append(obj)
+                except json.JSONDecodeError:
+                    pass
+    return found
 
 
 class Model:
@@ -101,9 +129,10 @@ class _HttpChat(Model):
         elif "reasoning" in low or "gpt-oss" in low or "r1" in low:
             # thinking models write their reasoning first; forcing JSON mode makes them stuff
             # it inside the JSON and run out of room — let them think, then read the JSON
-            self.options = {"max_tokens": 6000}
+            self.options = {"max_tokens": 8000}
         else:
             self.options = {"max_tokens": 2500, "temperature": 0, "response_format": {"type": "json_object"}}
+        self.merge_system = "reasoning" in low       # Phi-4-reasoning reads a system turn as the user's
         self.seconds = 0.0
 
     def _post(self, body: dict) -> dict:
@@ -123,8 +152,10 @@ class _HttpChat(Model):
     def ask(self, system: str, user: str) -> dict:
         start = time.monotonic()
         for attempt in range(7):
-            body = {"messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-                    **self.options}
+            messages = ([{"role": "user", "content": f"{system}\n\n{user}\n\nThink, then end your reply with "
+                                                         "the JSON object only."}] if self.merge_system else
+                        [{"role": "system", "content": system}, {"role": "user", "content": user}])
+            body = {"messages": messages, **self.options}
             if self.model:
                 body["model"] = self.model
             try:
