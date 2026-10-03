@@ -1,0 +1,21 @@
+# Justify checks every pull request to itself, with its own Action from this checkout.
+name: justify
+on: pull_request
+
+permissions:
+  contents: read
+
+jobs:
+  justify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./
+        with:
+          python-version: "3.12"
+          install-command: pip install ".[mcp,hosted,dev]"
+          test-command: python -m pytest -q

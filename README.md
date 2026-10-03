@@ -244,13 +244,30 @@ otherwise have removed needed code; each has a regression test in `tests/`.
 ## GitHub Action
 
 ```yaml
-- uses: actions/checkout@v5
-  with: { fetch-depth: 0 }        # history is needed for attribution
-- uses: BPSKartik/justify@main
-  with: { test-command: python -m pytest -q }
+permissions:
+  contents: read
+jobs:
+  justify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0              # history is needed for attribution
+          persist-credentials: false
+      - uses: BPSKartik/justify@v1
+        with:
+          python-version: "3.12"                     # your project's Python
+          install-command: pip install -e . pytest   # the tests need the project and pytest
+          test-command: python -m pytest -q          # leave out to scan without proof
 ```
 
-The report lands in the job summary. See `examples/justify-workflow.yml`.
+The report lands in the job summary of every pull request. It covers the whole repository at that commit,
+not only the pull request's changes. Without `install-command` the tests cannot run, so nothing can be
+proved — the report then says so plainly and the step raises a warning; it never passes that off as a clean
+result. `path` is the root of a self-contained project: its tests and config must be inside it. Keep the
+trigger on `pull_request`, never `pull_request_target`, because the proof runs the pull request's own tests.
+Full file: `examples/justify-workflow.yml`.
 
 ## Limits
 

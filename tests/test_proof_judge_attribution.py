@@ -2,6 +2,7 @@
 model can veto but never force, invented evidence is rejected, and authorship is
 read from the git history."""
 
+import subprocess
 import sys
 
 from conftest import git
@@ -302,3 +303,44 @@ def test_a_word_inside_a_string_is_not_evidence(make_repo):
     m = Scripted({"verdict": "keep", "reason": "used", "evidence": ["app.py:3"], "confidence": 0.9}, {})
     j = next(f for f in run(root, model=m, record=False).findings if f.name == "date").judgement
     assert "app.py:3" in j["evidence_rejected"] and not j["evidence_checked"]
+
+
+def test_report_never_passes_off_tests_that_cannot_run_as_a_clean_result(make_repo):
+    """The first real run of the GitHub Action without the project's test tools installed: the
+    baseline fails, so nothing is proved — and the report must say that, not 'JLR 100%'."""
+    from justify.report import markdown
+    root = make_repo({"app.py": "import io\n\n\ndef unused():\n    return 1\n", "check.py": "import app\n"})
+    res = run(root, prove_command=f"{sys.executable} -c 'import no_such_module_here'", record=False)
+    md = markdown(res)
+    assert res.proof["batch"] == "baseline failed"
+    assert "nothing proved — the tests fail before any change" in md
+    assert "This is not a clean result" in md and "no_such_module_here" in md     # the real error is shown
+    assert "100.0%" not in md and "not measured" in md
+    assert "`app.py:1`" in md and "`app.py:4`" in md                             # found, listed, not dropped
+    assert "None" not in md.replace("No ", "")
+
+
+def test_report_lists_removals_the_tests_cannot_reach(make_repo):
+    from justify.report import markdown
+    # the tests load app.py but never lonely.py: its unused import is found, but not provable
+    root = make_repo({"app.py": "import io\nx = 1\n", "lonely.py": "import json\ny = 2\n",
+                      "check.py": "import app\n"})
+    res = run(root, prove_command=f"{sys.executable} check.py", record=False)
+    md = markdown(res)
+    assert "### Found, not proved" in md and "`lonely.py:1`" in md
+    assert "### Remove" in md and "`app.py:1`" in md
+    assert "the tests never load this file" in md
+    assert "whole repository at this commit" in md
+
+
+def test_report_flags_a_shallow_clone(make_repo, git_repo, tmp_path):
+    from justify.report import markdown
+    src = git_repo(make_repo({"app.py": "import io\n"}))
+    git(src, "add", "app.py")
+    git(src, "commit", "-qm", "one")
+    (src / "app.py").write_text("import io\nx = 2\n")
+    git(src, "commit", "-qam", "two")
+    clone = tmp_path / "shallow"
+    subprocess.run(["git", "clone", "-q", "--depth", "1", f"file://{src}", str(clone)], check=True)
+    md = markdown(run(clone, record=False))
+    assert "shallow clone" in md and "fetch-depth: 0" in md
