@@ -37,11 +37,12 @@ class BlobError(Exception):
     pass
 
 
-class _Token:
-    """An Entra access token for Azure Storage, from the managed identity when running in Azure,
+class ManagedToken:
+    """An Entra access token for one resource, from the managed identity when running in Azure,
     or from `az login` on a developer's machine. Refreshed five minutes before it expires."""
 
-    def __init__(self):
+    def __init__(self, resource: str = "https://storage.azure.com/"):
+        self.resource = resource
         self.value, self.expires, self.lock = "", 0.0, threading.Lock()
 
     def get(self) -> str:
@@ -50,7 +51,7 @@ class _Token:
                 return self.value
             endpoint, secret = os.environ.get("IDENTITY_ENDPOINT"), os.environ.get("IDENTITY_HEADER")
             if endpoint and secret:
-                q = urllib.parse.urlencode({"resource": "https://storage.azure.com/", "api-version": "2019-08-01",
+                q = urllib.parse.urlencode({"resource": self.resource, "api-version": "2019-08-01",
                                             **({"client_id": os.environ["AZURE_CLIENT_ID"]}
                                                if os.environ.get("AZURE_CLIENT_ID") else {})})
                 req = urllib.request.Request(f"{endpoint}?{q}", headers={"X-IDENTITY-HEADER": secret})
@@ -58,11 +59,11 @@ class _Token:
                     data = json.loads(r.read())
                 self.value, self.expires = data["access_token"], float(data.get("expires_on") or time.time() + 3000)
             else:
-                out = subprocess.run(["az", "account", "get-access-token", "--resource", "https://storage.azure.com/",
+                out = subprocess.run(["az", "account", "get-access-token", "--resource", self.resource,
                                       "--query", "[accessToken,expires_on]", "-o", "tsv"],
                                      capture_output=True, text=True, timeout=60)
                 if out.returncode != 0:
-                    raise BlobError("no managed identity and no `az login` to reach Blob Storage")
+                    raise BlobError(f"no managed identity and no `az login` for {self.resource}")
                 token, expires = (out.stdout.split() + ["0"])[:2]
                 self.value, self.expires = token, float(expires) if expires.isdigit() else time.time() + 1800
             return self.value
@@ -71,7 +72,7 @@ class _Token:
 class BlobStore:
     def __init__(self, container_url: str):
         self.base = container_url.rstrip("/")
-        self.token = _Token()
+        self.token = ManagedToken("https://storage.azure.com/")
 
     def _call(self, method: str, name: str, body: bytes | None = None, headers: dict | None = None):
         h = {"Authorization": f"Bearer {self.token.get()}", "x-ms-version": API_VERSION,

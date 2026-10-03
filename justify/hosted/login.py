@@ -6,6 +6,9 @@ app; with neither set the service runs without accounts, exactly as before:
 
     JUSTIFY_GITHUB_CLIENT_ID      + JUSTIFY_GITHUB_CLIENT_SECRET
     JUSTIFY_MICROSOFT_CLIENT_ID   + JUSTIFY_MICROSOFT_CLIENT_SECRET   (+ JUSTIFY_MICROSOFT_TENANT, default common)
+                                  or JUSTIFY_MICROSOFT_FEDERATED=1 — no secret at all: the app registration
+                                  trusts the container app's managed identity, whose token is the
+                                  client's proof (a federated identity credential)
 
 Only the public profile is asked for (GitHub `read:user`; Microsoft `openid profile email`) —
 never repository access. The provider's token reads the profile once and is thrown away.
@@ -95,10 +98,21 @@ class GitHub(Provider):
 class Microsoft(Provider):
     key, label, scope = "microsoft", "Microsoft", "openid profile email"
 
-    def __init__(self, client_id, client_secret, tenant="common"):
+    def __init__(self, client_id, client_secret, tenant="common", assertion=None):
         super().__init__(client_id, client_secret)
         self.tenant = tenant or "common"
         self.base = f"https://login.microsoftonline.com/{urllib.parse.quote(self.tenant)}/oauth2/v2.0"
+        self.assertion = assertion            # returns a managed-identity token, when there is no secret
+
+    def _client_proof(self) -> dict:
+        if self.client_secret:
+            return {"client_secret": self.client_secret}
+        try:
+            token = self.assertion()
+        except Exception as exc:              # the identity endpoint is down or not configured
+            raise LoginError(f"the server could not prove who it is to Microsoft: {exc}") from None
+        return {"client_assertion_type": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+                "client_assertion": token}
 
     def authorize_url(self, redirect_uri, state, challenge, nonce):
         return f"{self.base}/authorize?" + urllib.parse.urlencode({
@@ -108,7 +122,7 @@ class Microsoft(Provider):
 
     def profile(self, code, redirect_uri, verifier, nonce):
         tok = _http(f"{self.base}/token", {
-            "client_id": self.client_id, "client_secret": self.client_secret, "code": code,
+            "client_id": self.client_id, **self._client_proof(), "code": code,
             "redirect_uri": redirect_uri, "grant_type": "authorization_code", "code_verifier": verifier,
             "scope": self.scope})
         claims = _id_token_claims(tok.get("id_token") or "")
@@ -140,8 +154,13 @@ def providers_from_env() -> dict[str, Provider]:
     if gid and gsecret:
         out["github"] = GitHub(gid, gsecret)
     mid, msecret = os.environ.get("JUSTIFY_MICROSOFT_CLIENT_ID"), os.environ.get("JUSTIFY_MICROSOFT_CLIENT_SECRET")
+    tenant = os.environ.get("JUSTIFY_MICROSOFT_TENANT", "common")
     if mid and msecret:
-        out["microsoft"] = Microsoft(mid, msecret, os.environ.get("JUSTIFY_MICROSOFT_TENANT", "common"))
+        out["microsoft"] = Microsoft(mid, msecret, tenant)
+    elif mid and os.environ.get("JUSTIFY_MICROSOFT_FEDERATED") == "1":
+        from .storage import ManagedToken
+        exchange = ManagedToken("api://AzureADTokenExchange")
+        out["microsoft"] = Microsoft(mid, "", tenant, assertion=exchange.get)
     return out
 
 

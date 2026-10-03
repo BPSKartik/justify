@@ -26,6 +26,7 @@
   const fmt = (n, d = 0) => (n == null || Number.isNaN(n) ? "—" : Number(n).toLocaleString("en-US", { maximumFractionDigits: d, minimumFractionDigits: d }));
   const compact = (n) => (n == null ? "—" : n >= 1e6 ? `${fmt(n / 1e6, 1)}M` : n >= 1e4 ? `${fmt(n / 1e3, 0)}k` : n >= 1e3 ? `${fmt(n / 1e3, 1)}k` : fmt(n));
   const short = (sha) => (sha ? sha.slice(0, 7) : "");
+  const plural = (n, word, many) => `${fmt(n)} ${n === 1 ? word : (many || `${word}s`)}`;
   const ago = (t) => {
     const ms = typeof t === "number" ? t * 1000 : Date.parse(t);
     if (!ms) return "";
@@ -178,6 +179,6 @@
     YAML: "#7d8fa8", HTML: "#e37b5b", CSS: "#5b8fe3", "Jupyter notebook": "#f0a64b" };
   const langColor = (name) => LANG[name] || "#7189a8";
 
-  window.Justify = { langColor, $, el, svg, fmt, compact, short, ago, toast, copy, api, loadConfig, loadMe, renderAuth, avatar, signOut,
+  window.Justify = { langColor, plural, $, el, svg, fmt, compact, short, ago, toast, copy, api, loadConfig, loadMe, renderAuth, avatar, signOut,
     city, cityTip, webglOK, get me() { return me; }, get csrf() { return csrf; } };
 })();

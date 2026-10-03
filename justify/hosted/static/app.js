@@ -280,7 +280,7 @@
     const codeFiles = code.reduce((s, l) => s + l.files, 0);
     $("result-meta").textContent = [
       upload ? "uploaded code" : `${scan.ref || "default branch"} · commit ${short(scan.sha)}`,
-      langs.length ? `${fmt(codeFiles)} code files · ${fmt(codeLines)} lines` : `${fmt(r.files)} Python files · ${fmt(r.lines)} lines`,
+      langs.length ? `${J.plural(codeFiles, "code file")} · ${J.plural(codeLines, "line")}` : `${J.plural(r.files, "Python file")} · ${J.plural(r.lines, "line")}`,
       scan.duration_s ? `audited in ${fmt(scan.duration_s, 1)} s` : null,
     ].filter(Boolean).join(" · ");
 
@@ -353,11 +353,11 @@
       const sw = el("i", { class: "sw" });
       sw.style.background = J.langColor(l.name);
       list.append(el("li", {}, sw, el("b", { text: l.name }),
-        el("span", { class: "meta", text: `${fmt(l.lines)} lines · ${fmt(l.files)} files` }),
+        el("span", { class: "meta", text: `${J.plural(l.lines, "line")} · ${J.plural(l.files, "file")}` }),
         el("span", { class: `depth depth-${l.audit}`, text: depth[l.audit] || "Counted" })));
     });
     bar.setAttribute("aria-label", langs.slice(0, 8).map((l) => `${l.name} ${fmt((100 * l.lines) / total, 0)}%`).join(", "));
-    $("madeof-meta").textContent = `${fmt(total)} lines in ${fmt(langs.reduce((s, l) => s + l.files, 0))} files`;
+    $("madeof-meta").textContent = `${J.plural(total, "line")} in ${J.plural(langs.reduce((s, l) => s + l.files, 0), "file")}`;
   }
 
   /* ---------------------------------------------------------------- the city of this repository */
@@ -372,7 +372,7 @@
     $("cityview").hidden = files.length < 2;
     if (files.length < 2) return;
     const traced = files.some((f) => (f.ai || 0) + (f.human || 0) > 0);
-    $("city-meta").textContent = `${fmt(files.length)} files${files.length >= 3000 ? " (the largest 3,000)" : ""} · height is size · click a tower to see its findings`;
+    $("city-meta").textContent = `${J.plural(files.length, "file")}${files.length >= 3000 ? " (the largest 3,000)" : ""} · height is size · click a tower to see its findings`;
     for (const b of $("city-modes").querySelectorAll("button")) {
       b.setAttribute("aria-pressed", String(b.dataset.mode === "all"));
       b.hidden = b.dataset.mode === "authors" && !traced;
@@ -415,7 +415,7 @@
       return;
     }
     const aiShare = (100 * (code.ai_lines || 0)) / total;
-    $("authors-meta").textContent = `${fmt(a.ai_commits)} of ${fmt(a.commits)} commits carry an assistant's signature`;
+    $("authors-meta").textContent = `${fmt(a.ai_commits)} of ${J.plural(a.commits, "commit")} ${a.ai_commits === 1 ? "carries" : "carry"} an assistant's signature`;
     const aiBar = el("span", { class: "ai" });
     const humanBar = el("span", { class: "human" });
     aiBar.style.width = `${aiShare}%`;
