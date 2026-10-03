@@ -505,16 +505,17 @@ def test_one_account_can_be_opened_with_github_and_microsoft(tmp_path, monkeypat
         assert "link_error=" in out.headers["location"]
         assert accounts.identities(busy["id"]) == ["github"]
 
-        # a link started by one account cannot be finished by another signed in meanwhile
+        # a link started by one account cannot be finished by another account's session
         start = c.get("/auth/github/start?link=1")
         state = re.search(r"state=([^&]+)", start.headers["location"]).group(1)
-        c.cookies.set("jfy_session", accounts.new_session(busy["id"])[0])
-        stolen = c.get(f"/auth/github/callback?code=g-kartik&state={state}")
-        assert stolen.headers["location"].startswith("/signin?error=")
+        thief = TestClient(app, base_url="http://localhost", follow_redirects=False)
+        thief.cookies.set("jfy_session", accounts.new_session(busy["id"])[0])
+        thief.cookies.set(app_mod.STATE_COOKIE, state)
+        stolen = thief.get(f"/auth/github/callback?code=g-kartik&state={state}")
+        assert "then connect from your dashboard" in unquote(stolen.headers["location"])   # refused for this reason
         assert accounts.identities(busy["id"]) == ["github"]
 
         # disconnecting: never the last way in; GitHub takes its username with it
-        c.cookies.set("jfy_session", accounts.new_session(me["user"]["id"])[0])
         csrf = c.get("/api/me").json()["csrf"]
         signins = c.get("/api/me/signins").json()["signins"]
         assert {s["key"]: s["connected"] for s in signins} == {"github": True, "microsoft": True}
