@@ -6,6 +6,9 @@
 <title>Justify — every line earns its place</title>
 <meta name="description" content="Audit any public GitHub repository for code that cannot justify its existence, split by AI-assisted and human authorship. Connect any AI assistant over MCP.">
 <meta name="color-scheme" content="light dark">
+<meta property="og:title" content="Justify — every line earns its place">
+<meta property="og:description" content="Find the code that cannot justify its existence, and how much of it came from AI-assisted commits.">
+<meta property="og:image" content="/static/og.png">
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -16,41 +19,114 @@
 <body>
 <a class="skip" href="#main">Skip to content</a>
 
+<svg width="0" height="0" class="defs" aria-hidden="true">
+  <symbol id="mark" viewBox="0 0 64 64">
+    <rect class="m-bar" x="12" y="6" width="43" height="8" rx="4"/>
+    <rect class="m-bar" x="37" y="17" width="18" height="8" rx="4"/>
+    <rect class="m-dead" x="44" y="28" width="18" height="8" rx="4"/>
+    <rect class="m-bar" x="37" y="39" width="18" height="8" rx="4"/>
+    <rect class="m-bar" x="7" y="39" width="11" height="8" rx="4"/>
+    <rect class="m-bar" x="9" y="50" width="46" height="8" rx="4"/>
+  </symbol>
+</svg>
+
 <header class="top">
   <div class="wrap top-row">
     <a class="brand" href="/" aria-label="Justify, home">
-      <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="5" width="26" height="4" rx="1"/><rect x="3" y="14" width="17" height="4" rx="1" class="cut"/><rect x="3" y="23" width="22" height="4" rx="1"/><path d="M23 13.5l3 3 5-6" class="tick"/></svg>
+      <svg class="mark" aria-hidden="true"><use href="#mark"/></svg>
       <span>Justify</span>
     </a>
     <nav aria-label="Sections">
+      <a href="#finds">What it finds</a>
       <a href="#how">How it works</a>
+      <a href="#data">The data</a>
       <a href="#connect">Connect your AI</a>
-      <a href="https://github.com/BPSKartik/justify" rel="noopener">GitHub</a>
+      <a class="gh" href="https://github.com/BPSKartik/justify" rel="noopener">GitHub</a>
     </nav>
   </div>
 </header>
 
 <main id="main">
   <section class="hero" aria-labelledby="hero-title">
-    <div class="wrap">
-      <p class="eyebrow">Does the AI assistant actually pay off?</p>
-      <h1 id="hero-title">Every line has to <em>earn its place.</em></h1>
-      <p class="lede">Justify reads a whole repository, finds the code that cannot justify its existence — unused imports, functions, classes and dependencies, and duplicate helpers — and shows how much of it came from AI-assisted commits.</p>
+    <div class="wrap hero-grid">
+      <div class="hero-copy">
+        <p class="eyebrow">Does the AI assistant actually pay off?</p>
+        <h1 id="hero-title" aria-label="Every line has to earn its place.">Every line has to earn its <del>own</del> place.</h1>
+        <p class="lede">Justify reads a whole repository and asks every import, function, class and dependency one question: <i>why are you here?</i> What cannot answer is dead weight. Justify finds it, shows how much came from AI-assisted commits, and removes it only with proof.</p>
 
-      <form id="scan-form" class="scan-form" novalidate>
-        <label for="repo" class="sr-only">Public GitHub repository</label>
-        <div class="field">
-          <span class="field-prefix" aria-hidden="true">github.com/</span>
-          <input id="repo" name="repo" type="text" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false"
-                 placeholder="owner/repository" aria-describedby="repo-hint repo-error" required>
-          <button id="scan-btn" type="submit">Audit it</button>
-        </div>
-        <p id="repo-error" class="field-error" role="alert" hidden></p>
-        <p id="repo-hint" class="hint">Public Python repositories. Read-only: the hosted service never runs your code.
-          Try <button type="button" class="example" data-repo="PrefectHQ/fastmcp">PrefectHQ/fastmcp</button>,
-          <button type="button" class="example" data-repo="judeper/FSI-CopilotGov">judeper/FSI-CopilotGov</button> or
-          <button type="button" class="example" data-repo="Azure/azure-functions-agents-runtime">Azure/azure-functions-agents-runtime</button>.</p>
-      </form>
+        <form id="scan-form" class="scan-form" novalidate>
+          <label for="repo" class="sr-only">Public GitHub repository</label>
+          <div class="field">
+            <span class="field-prefix" aria-hidden="true">github.com/</span>
+            <input id="repo" name="repo" type="text" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false"
+                   placeholder="owner/repository" aria-describedby="repo-hint repo-error" required>
+            <button id="scan-btn" type="submit">Audit it</button>
+          </div>
+          <p id="repo-error" class="field-error" role="alert" hidden></p>
+          <p id="repo-hint" class="hint">Try
+            <button type="button" class="example" data-repo="PrefectHQ/fastmcp">PrefectHQ/fastmcp</button>
+            <button type="button" class="example" data-repo="judeper/FSI-CopilotGov">judeper/FSI-CopilotGov</button>
+            <button type="button" class="example" data-repo="Azure/azure-functions-agents-runtime">Azure/azure-functions-agents-runtime</button></p>
+        </form>
+        <ul class="trust" aria-label="What the hosted audit does">
+          <li>Public Python repositories</li>
+          <li>Read-only — never runs your code</li>
+          <li>Open source, MIT</li>
+        </ul>
+      </div>
+
+      <figure class="hero-art" aria-hidden="true">
+        <svg viewBox="0 0 520 450" class="iceberg">
+          <defs>
+            <linearGradient id="deep" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0d3a66"/><stop offset="1" stop-color="#0a1a30"/></linearGradient>
+            <linearGradient id="beam" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4ba3f0" stop-opacity="0"/><stop offset=".8" stop-color="#4ba3f0" stop-opacity=".22"/><stop offset="1" stop-color="#8cc4f6" stop-opacity=".9"/></linearGradient>
+            <clipPath id="win"><rect x="34" y="28" width="452" height="396" rx="14"/></clipPath>
+          </defs>
+          <rect x="34" y="28" width="452" height="396" rx="14" class="win"/>
+          <g clip-path="url(#win)">
+            <rect x="34" y="176" width="452" height="248" fill="url(#deep)"/>
+            <rect x="34" y="28" width="452" height="34" class="titlebar"/>
+            <circle cx="56" cy="45" r="5" fill="#ff7a6b"/><circle cx="74" cy="45" r="5" fill="#f2b84b"/><circle cx="92" cy="45" r="5" fill="#7ee787"/>
+            <text x="114" y="49" class="art-mono">your-repo · main</text>
+            <!-- above the waterline: what gets measured -->
+            <g class="code">
+              <rect x="80" y="82" width="190" height="8" rx="4"/><rect x="96" y="100" width="200" height="8" rx="4"/>
+              <rect x="96" y="118" width="170" height="8" rx="4"/><rect x="80" y="136" width="120" height="8" rx="4"/>
+              <rect x="80" y="154" width="220" height="8" rx="4"/>
+            </g>
+            <text x="466" y="96" class="art-label end">lines written</text>
+            <text x="466" y="114" class="art-label end">suggestions accepted</text>
+            <!-- the waterline -->
+            <path d="M34 178 q 18 -8 36 0 t 36 0 t 36 0 t 36 0 t 36 0 t 36 0 t 36 0 t 36 0 t 36 0 t 36 0 t 36 0 t 36 0 t 36 0" class="wave"/>
+            <!-- below: what it costs to own -->
+            <g class="code deep-code">
+              <rect x="80" y="202" width="230" height="8" rx="4"/><rect x="96" y="220" width="160" height="8" rx="4"/>
+              <rect x="96" y="256" width="210" height="8" rx="4"/><rect x="80" y="292" width="180" height="8" rx="4"/>
+              <rect x="96" y="310" width="160" height="8" rx="4"/><rect x="80" y="364" width="200" height="8" rx="4"/>
+              <rect x="96" y="382" width="150" height="8" rx="4"/>
+            </g>
+            <g class="dead-line">
+              <rect x="96" y="238" width="140" height="8" rx="4" class="dead"/>
+              <path d="M244 242 H362" class="dead-link"/>
+              <rect x="368" y="232" width="74" height="20" rx="3" class="stamp-box" transform="rotate(-3 405 242)"/>
+              <text x="405" y="246" class="stamp-text" transform="rotate(-3 405 242)">REMOVE</text>
+            </g>
+            <g class="dup-line">
+              <rect x="80" y="274" width="170" height="8" rx="4" class="dup"/>
+              <rect x="80" y="346" width="170" height="8" rx="4" class="dup"/>
+              <path d="M262 278 h14 v72 h-14" class="dup-bracket"/>
+              <rect x="290" y="304" width="86" height="20" rx="3" class="stamp-box dup-box" transform="rotate(2 333 314)"/>
+              <text x="333" y="318" class="stamp-text dup-text" transform="rotate(2 333 314)">SIMPLIFY</text>
+            </g>
+            <g class="dead-line">
+              <rect x="96" y="328" width="96" height="8" rx="4" class="dead"/>
+            </g>
+            <text x="466" y="410" class="art-label deep-label end">what it costs to own</text>
+            <rect x="34" y="176" width="452" height="60" fill="url(#beam)" class="scanbeam"/>
+          </g>
+          <text x="34" y="446" class="art-caption">Everyone measures the tip. The cost is underwater.</text>
+        </svg>
+      </figure>
     </div>
   </section>
 
@@ -64,7 +140,6 @@
         </div>
         <p id="scan-clock" class="clock" aria-hidden="true"></p>
       </div>
-
       <ol class="rail" id="rail" aria-label="Audit stages">
         <li data-stage="clone"><span class="dot"></span><span class="rail-name">Fetch</span><span class="rail-note">history included</span></li>
         <li data-stage="ingest"><span class="dot"></span><span class="rail-name">Read</span><span class="rail-note">every Python file</span></li>
@@ -75,7 +150,6 @@
         <li data-stage="local" class="local"><span class="dot"></span><span class="rail-name">Judge &amp; prove</span><span class="rail-note">on your machine</span></li>
       </ol>
       <p id="scan-status" class="status"></p>
-
       <div id="scan-failed" class="notice notice-bad" hidden>
         <h3 id="fail-title">The audit could not finish</h3>
         <p id="fail-text"></p>
@@ -99,7 +173,6 @@
             <a id="download-md" class="ghost" download>Download .md</a>
           </div>
         </div>
-
         <div class="balance">
           <div class="jlr">
             <p class="jlr-label">Justified Line Ratio</p>
@@ -108,18 +181,17 @@
           </div>
           <dl class="ledger" id="ledger"></dl>
         </div>
-
         <div class="authors" id="authors" hidden>
           <div class="authors-head">
             <h3>Who wrote it</h3>
             <p class="meta" id="authors-meta"></p>
           </div>
           <div class="split" id="split" role="img"></div>
+          <div class="legend"><span><i class="sw ai"></i>AI-assisted</span><span><i class="sw human"></i>Human</span></div>
           <div class="compare" id="compare"></div>
           <p class="caveat">AI-assisted means the commit carries an assistant trailer such as <code>Co-Authored-By: Claude</code>. Assistants used without one count as human, so the AI share is a lower bound. Ratios need at least 500 lines on each side.</p>
         </div>
         <p class="notice notice-quiet" id="no-git" hidden>Authorship could not be traced for this repository.</p>
-
         <div class="findings">
           <div class="findings-head">
             <h3>Line items <span class="count" id="findings-count"></span></h3>
@@ -149,52 +221,173 @@
 
   <section class="recent" id="recent-wrap" hidden aria-labelledby="recent-title">
     <div class="wrap">
-      <h2 id="recent-title" class="section-title">Recently audited</h2>
+      <h2 id="recent-title" class="section-title small">Recently audited</h2>
       <ul class="recent-list" id="recent"></ul>
     </div>
   </section>
 
-  <section id="connect" class="connect" aria-labelledby="connect-title">
+  <section id="finds" class="finds band" aria-labelledby="finds-title">
     <div class="wrap">
-      <p class="eyebrow">Model Context Protocol</p>
-      <h2 id="connect-title" class="section-title">Let your AI assistant check its own work.</h2>
-      <p class="section-lede">The assistant that writes the code can call Justify before it hands the code over. One URL, no account, no key:</p>
-      <div class="endpoint"><code id="endpoint"></code><button type="button" class="ghost copy" data-copy-target="endpoint">Copy</button></div>
-
-      <div class="tabs" role="tablist" aria-label="AI assistants" id="client-tabs"></div>
-      <div class="panes" id="client-panes"></div>
-
-      <div class="local" id="local">
-        <h3>Private code, and proof</h3>
-        <p>The hosted audit reads public repositories and never runs anything. To audit private code, and to <b>prove</b> each removal by running your own tests on a temporary copy, run Justify locally:</p>
-        <pre class="code"><code id="local-install">pip install "justify-code[mcp] @ git+https://github.com/BPSKartik/justify"</code><button type="button" class="ghost copy" data-copy-target="local-install">Copy</button></pre>
-        <pre class="code"><code id="local-run">justify scan . --prove "python -m pytest -q"</code><button type="button" class="ghost copy" data-copy-target="local-run">Copy</button></pre>
-        <p class="meta">As a local MCP server: command <code>justify-mcp</code>, with <code>JUSTIFY_TEST_COMMAND</code> (the only command it will run) and <code>JUSTIFY_ALLOWED_ROOTS</code> (the only folders it may read).</p>
+      <p class="eyebrow">What it finds</p>
+      <h2 id="finds-title" class="section-title">Four kinds of weight. Every one passes every test.</h2>
+      <p class="section-lede">Dead weight never breaks anything — that is why it survives. An assistant writes for the prompt in front of it, not for the codebase it cannot see, so it leaves these behind:</p>
+      <div class="kinds">
+        <article class="kind">
+          <svg class="spot" viewBox="0 0 64 64" aria-hidden="true"><rect x="6" y="18" width="24" height="28" rx="4" class="s-line"/><path d="M14 27h8M14 33h8M14 39h5" class="s-line"/><path d="M30 32h10" class="s-line"/><path d="M42 32h14" class="s-dash"/><circle cx="58" cy="32" r="3" class="s-dead"/></svg>
+          <h3>Unused imports</h3>
+          <p>A module loaded that nothing calls. Every one is read, parsed and loaded on every run.</p>
+          <pre class="snip"><code><span class="k">import</span> io          <span class="c"># nothing uses it</span></code></pre>
+        </article>
+        <article class="kind">
+          <svg class="spot" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="14" class="s-dash"/><text x="32" y="37" class="s-text">f()</text><path d="M8 14l8 8M56 14l-8 8M8 50l8-8M56 50l-8-8" class="s-faint"/></svg>
+          <h3>Unused functions</h3>
+          <p>A helper with no callers anywhere in the repository — kept alive only because nobody checked.</p>
+          <pre class="snip"><code><span class="k">def</span> clock_time():   <span class="c"># 0 callers</span></code></pre>
+        </article>
+        <article class="kind">
+          <svg class="spot" viewBox="0 0 64 64" aria-hidden="true"><rect x="8" y="12" width="26" height="34" rx="4" class="s-line"/><rect x="30" y="20" width="26" height="34" rx="4" class="s-dup"/><path d="M15 22h12M15 28h12M15 34h8M37 30h12M37 36h12M37 42h8" class="s-line"/></svg>
+          <h3>Duplicate helpers</h3>
+          <p>The same job written twice, because the assistant could not see the first one.</p>
+          <pre class="snip"><code><span class="k">def</span> fmt_date(d) <span class="c">≡</span> <span class="k">def</span> format_date(d)</code></pre>
+        </article>
+        <article class="kind">
+          <svg class="spot" viewBox="0 0 64 64" aria-hidden="true"><path d="M32 8l20 11v24L32 54 12 43V19z" class="s-line"/><path d="M12 19l20 11 20-11M32 30v24" class="s-line"/><path d="M50 50l8 8" class="s-dead-line"/></svg>
+          <h3>Unused dependencies</h3>
+          <p>A package installed that no file imports — one more thing to download, patch and audit.</p>
+          <pre class="snip"><code>leftpad==1.0     <span class="c"># no file imports it</span></code></pre>
+        </article>
       </div>
     </div>
   </section>
 
   <section id="how" class="how" aria-labelledby="how-title">
     <div class="wrap">
+      <p class="eyebrow">How it works</p>
       <h2 id="how-title" class="section-title">Seven stages. The model never deletes.</h2>
-      <ol class="stages">
-        <li><b>Ingest</b><span>Every file read once and fingerprinted.</span></li>
-        <li><b>Static facts</b><span>Syntax trees, not text search: who uses what, across the whole repository.</span></li>
-        <li><b>Candidates</b><span>Anything a graph can misjudge — frameworks, dynamic lookups, re-exports — waits for judgement.</span></li>
-        <li class="model"><b>Justify</b><span>A model is asked why the unit exists, and must cite a file and line that is then checked.</span></li>
-        <li class="model"><b>Challenge</b><span>A second call tries to prove the code is needed. If it can, the code stays.</span></li>
-        <li class="proof"><b>Proof</b><span>Removed in a temporary copy, then your tests run. A file the tests never load is “not provable”.</span></li>
-        <li><b>Report</b><span>One report with a reason on every line, and a ledger of every run. A person approves.</span></li>
+      <p class="section-lede">A code graph proposes, a model is asked why, a second call tries to prove it wrong, the tests decide, and a person approves. Doubt always means keep.</p>
+      <ol class="pipeline">
+        <li><span class="pn">1</span><b>Ingest</b><span>Every file read once and fingerprinted.</span></li>
+        <li><span class="pn">2</span><b>Static facts</b><span>Syntax trees, not text search: who uses what, across the whole repository.</span></li>
+        <li><span class="pn">3</span><b>Candidates</b><span>Frameworks, dynamic lookups and re-exports are held back for judgement.</span></li>
+        <li class="model"><span class="pn">4</span><b>Justify</b><span>A model is asked why the unit exists, and must cite a file and line that is then checked.</span></li>
+        <li class="model"><span class="pn">5</span><b>Challenge</b><span>A second call tries to prove the code is needed. If it can, the code stays.</span></li>
+        <li class="proof"><span class="pn">6</span><b>Proof</b><span>Removed in a temporary copy; your tests run. A file the tests never load is “not provable”.</span></li>
+        <li><span class="pn">7</span><b>Report</b><span>A reason on every line, a ledger of every run. A person approves.</span></li>
       </ol>
-      <p class="meta">This site runs stages 1–3 plus authorship. Stages 4–6 run on your machine, with your model and your tests.</p>
+      <div class="where">
+        <p><span class="tag tag-site">This site</span> stages 1–3, authorship and the score — public repositories, read-only.</p>
+        <p><span class="tag tag-local">Your machine</span> stages 4–6 — your model, your tests, your private code.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="data" class="data band" aria-labelledby="data-title">
+    <div class="wrap data-grid">
+      <div>
+        <p class="eyebrow">What we measured</p>
+        <h2 id="data-title" class="section-title">Does it pay off? It depends on the repository.</h2>
+        <p class="section-lede">We ran Justify on five public repositories with AI-assisted commits — 3,247 files, 989,614 lines — and split every finding by who wrote it.</p>
+        <ol class="takeaways">
+          <li><b>Unused code is not where AI-assisted code costs.</b> It carried no more than human code in all five.</li>
+          <li><b>Duplication is.</b> Higher in three of five — 7.7× the human rate in the largest repository.</li>
+          <li><b>There is no single answer.</b> The same assistant pays off in one repository and costs in another. Measure yours.</li>
+        </ol>
+        <p class="caveat">Static stages and authorship, no proof. AI-assisted = commits with an assistant trailer, a lower bound. Rework is counted from the first AI-assisted commit.</p>
+      </div>
+      <figure class="chart" aria-labelledby="chart-cap">
+        <figcaption id="chart-cap">Duplicate code per 1,000 lines</figcaption>
+        <div class="chart-legend"><span><i class="sw ai"></i>AI-assisted</span><span><i class="sw human"></i>Human</span></div>
+        <div id="dup-chart" class="bars"></div>
+        <div class="sr-only"><table id="dup-table"><caption>Duplicate code per 1,000 lines, AI-assisted versus human</caption></table></div>
+      </figure>
+    </div>
+  </section>
+
+  <section id="connect" class="connect" aria-labelledby="connect-title">
+    <div class="wrap connect-grid">
+      <div>
+        <p class="eyebrow">Model Context Protocol</p>
+        <h2 id="connect-title" class="section-title">Let your AI assistant check its own work.</h2>
+        <p class="section-lede">The assistant that writes the code can call Justify before it hands the code over. One URL — no account, no key.</p>
+        <div class="endpoint"><code id="endpoint"></code><button type="button" class="ghost copy" data-copy-target="endpoint">Copy</button></div>
+      </div>
+      <figure class="hub" aria-hidden="true">
+        <svg viewBox="0 0 360 260">
+          <g class="spokes">
+            <path d="M180 130 L62 46"/><path d="M180 130 L298 46"/><path d="M180 130 L40 130"/>
+            <path d="M180 130 L320 130"/><path d="M180 130 L70 214"/><path d="M180 130 L290 214"/>
+          </g>
+          <circle cx="180" cy="130" r="42" class="hub-core"/>
+          <svg x="156" y="106" width="48" height="48" viewBox="0 0 64 64" class="hub-mark"><use href="#mark"/></svg>
+          <g class="hub-node"><rect x="18" y="32" width="88" height="28" rx="14"/><text x="62" y="51">Claude</text></g>
+          <g class="hub-node"><rect x="254" y="32" width="88" height="28" rx="14"/><text x="298" y="51">Copilot</text></g>
+          <g class="hub-node"><rect x="-4" y="116" width="88" height="28" rx="14"/><text x="40" y="135">ChatGPT</text></g>
+          <g class="hub-node"><rect x="276" y="116" width="88" height="28" rx="14"/><text x="320" y="135">Cursor</text></g>
+          <g class="hub-node"><rect x="20" y="200" width="100" height="28" rx="14"/><text x="70" y="219">Gemini CLI</text></g>
+          <g class="hub-node"><rect x="232" y="200" width="116" height="28" rx="14"/><text x="290" y="219">Copilot Studio</text></g>
+          <text x="180" y="190" class="hub-label">MCP · one URL</text>
+        </svg>
+      </figure>
+    </div>
+    <div class="wrap">
+      <div class="tabs" role="tablist" aria-label="AI assistants" id="client-tabs"></div>
+      <div class="panes" id="client-panes"></div>
+
+      <div class="local" id="local">
+        <div>
+          <h3>Private code, and proof</h3>
+          <p>The hosted audit reads public repositories and never runs anything. To audit private code, and to <b>prove</b> each removal by running your own tests on a temporary copy, run Justify on your machine:</p>
+        </div>
+        <pre class="code"><code id="local-install">pip install "justify-code[mcp] @ git+https://github.com/BPSKartik/justify"</code><button type="button" class="ghost copy" data-copy-target="local-install">Copy</button></pre>
+        <pre class="code"><code id="local-run">justify scan . --prove "python -m pytest -q"</code><button type="button" class="ghost copy" data-copy-target="local-run">Copy</button></pre>
+        <p class="meta">As a local MCP server: command <code>justify-mcp</code>, with <code>JUSTIFY_TEST_COMMAND</code> (the only command it may run) and <code>JUSTIFY_ALLOWED_ROOTS</code> (the only folders it may read).</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="faq" class="faq band" aria-labelledby="faq-title">
+    <div class="wrap faq-grid">
+      <div>
+        <p class="eyebrow">Questions</p>
+        <h2 id="faq-title" class="section-title">Before you trust it.</h2>
+        <svg class="faq-art" viewBox="0 0 220 160" aria-hidden="true">
+          <rect x="20" y="24" width="120" height="112" rx="10" class="fa-paper"/>
+          <path d="M40 52h80M40 70h64M40 88h76M40 106h52" class="fa-line"/>
+          <path d="M40 70h64" class="fa-strike"/>
+          <g transform="rotate(-8 168 92)"><rect x="128" y="74" width="80" height="34" rx="4" class="fa-stamp"/><text x="168" y="96" class="fa-stamp-text">PROVED</text></g>
+        </svg>
+      </div>
+      <div class="qa">
+        <details open><summary>Does Justify ever delete my code?</summary>
+          <p>No. It proposes. On your machine it removes code only in a temporary copy, runs your tests there, and writes a report. A person approves every change. The model can veto a removal; it can never force one.</p></details>
+        <details><summary>What does this website do with a repository?</summary>
+          <p>It clones the public repository, reads it, traces each line to an AI-assisted or human commit, and deletes the clone. It never runs the repository's code or tests and never sends it to a model. Results are cached by commit.</p></details>
+        <details><summary>How does it know which code an AI wrote?</summary>
+          <p>From commit trailers the assistants write themselves, like <code>Co-Authored-By: Claude</code> or <code>Co-authored-by: Copilot</code>. An assistant used without a trailer counts as human, so the AI share is always a lower bound.</p></details>
+        <details><summary>What is the Justified Line Ratio?</summary>
+          <p>The share of lines that are not dead weight: lines left after removing everything with no use anywhere, divided by all lines. A team can track it per repository, per quarter, and split by authorship.</p></details>
+        <details><summary>How is this different from a linter?</summary>
+          <p>A linter looks at one file and asks whether a name is used. Justify looks at the whole repository, asks whether the code is <i>worth keeping</i>, explains why with a file and line, proves removals with your tests, and splits the result by who wrote it.</p></details>
+        <details><summary>Which languages?</summary>
+          <p>Python today. The parsing layer is built to take tree-sitter for more languages next.</p></details>
+      </div>
     </div>
   </section>
 </main>
 
 <footer class="foot">
-  <div class="wrap foot-row">
-    <p>Justify · MIT licensed · <a href="https://github.com/BPSKartik/justify" rel="noopener">source on GitHub</a></p>
-    <p>Team Error 404 · Microsoft Innovate 2026 · Bennett University</p>
+  <div class="wrap foot-grid">
+    <div class="foot-brand">
+      <svg class="mark" aria-hidden="true"><use href="#mark"/></svg>
+      <div><b>Justify</b><span>Every line earns its place.</span></div>
+    </div>
+    <ul class="foot-links">
+      <li><a href="https://github.com/BPSKartik/justify" rel="noopener">Source on GitHub</a></li>
+      <li><a href="https://github.com/BPSKartik/justify/blob/main/LICENSE" rel="noopener">MIT licence</a></li>
+      <li><a href="#connect">Connect your AI</a></li>
+      <li><a href="/health">Status</a></li>
+    </ul>
+    <p class="foot-note">Team Error 404 · Microsoft Innovate 2026 · Bennett University</p>
   </div>
 </footer>
 

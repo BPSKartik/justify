@@ -392,9 +392,38 @@
     }
   }
 
+  /* ---------------------------------------------------------------- the measured data (README, 2 Oct 2026) */
+  const STUDY = [
+    { repo: "jmorrison-juniper/MistHelper", lines: 606946, ai: 7.59, human: 0.99 },
+    { repo: "PrefectHQ/fastmcp", lines: 250117, ai: 1.67, human: 3.23 },
+    { repo: "Azure/azure-functions-agents-runtime", lines: 54240, ai: 2.39, human: 2.09 },
+    { repo: "judeper/FSI-CopilotGov", lines: 41188, ai: 0.56, human: 0.0 },
+    { repo: "MasterworkTools/openforge-catalog", lines: 37123, ai: 3.23, human: 8.81 },
+  ];
+
+  function renderDupChart() {
+    const box = $("dup-chart");
+    const max = Math.max(...STUDY.flatMap((r) => [r.ai, r.human]));
+    const table = $("dup-table");
+    table.append(el("tr", {}, el("th", { text: "Repository" }), el("th", { text: "AI-assisted" }), el("th", { text: "Human" })));
+    for (const r of STUDY) {
+      const bar = (cls, v) => {
+        const i = el("i");
+        i.style.width = `${Math.max(0.5, (100 * v) / max)}%`;
+        return el("span", { class: `bar ${cls}` }, i, fmt(v, 2));
+      };
+      box.append(el("div", { class: `bar-row${r.ai > 2 * Math.max(r.human, 0.01) && r.ai > 5 ? " hot" : ""}` },
+        el("div", { class: "bar-name" }, el("span", { class: "owner", text: `${r.repo.split("/")[0]}/` }),
+          r.repo.split("/")[1], el("small", { text: `${fmt(r.lines)} lines` })),
+        el("div", { class: "bar-pair" }, bar("ai", r.ai), bar("human", r.human))));
+      table.append(el("tr", {}, el("td", { text: r.repo }), el("td", { text: fmt(r.ai, 2) }), el("td", { text: fmt(r.human, 2) })));
+    }
+  }
+
   /* ---------------------------------------------------------------- wiring */
   function init() {
     renderClients();
+    renderDupChart();
     for (const b of document.querySelectorAll("[data-copy-target]")) {
       b.addEventListener("click", () => copy($(b.dataset.copyTarget).textContent, "Command"));
     }
