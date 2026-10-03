@@ -11,6 +11,10 @@ from . import NAME, TAGLINE, __version__
 from .model import REMOVE, SIMPLIFY
 
 
+def _n(value) -> str:
+    return "n/a" if value is None else str(value)
+
+
 def _print_summary(res) -> None:
     m = res.metrics
     print(f"\n{NAME}  ·  {res.root}")
@@ -74,10 +78,10 @@ def _print_summary(res) -> None:
             print(f"  History               thin: {h['commits']} commit(s); one wrote {h['largest_commit_percent']}% of "
                   "today's lines — it cannot show how this code was written")
         if m["jlr_percent"] is not None:
-            print(f"  Dead weight / 1,000   AI-assisted {a['ai_dead_per_1000']}   ·   human {a['human_dead_per_1000']}"
+            print(f"  Dead weight / 1,000   AI-assisted {_n(a['ai_dead_per_1000'])}   ·   human {_n(a['human_dead_per_1000'])}"
                   + (f"   ·   ratio {a['ai_to_human_ratio']}×" if a["ai_to_human_ratio"] is not None else ""))
         if a.get("ai_dup_per_1000") is not None or a.get("human_dup_per_1000") is not None:
-            print(f"  Duplicates / 1,000    AI-assisted {a.get('ai_dup_per_1000')}   ·   human {a.get('human_dup_per_1000')}")
+            print(f"  Duplicates / 1,000    AI-assisted {_n(a.get('ai_dup_per_1000'))}   ·   human {_n(a.get('human_dup_per_1000'))}")
         rw = a.get("rework")
         if rw and rw["ai"]["rewritten_percent"] is not None:
             human = rw["human"]["rewritten_percent"]
@@ -143,7 +147,7 @@ def main(argv: list[str] | None = None) -> int:
         from .ledger import Ledger
         for r in Ledger().history(str(args.path.expanduser().resolve())):
             print(f"  #{r['id']:<4} {r['started']}  JLR {r['jlr']}%  dead {r['dead_lines']} lines  "
-                  f"AI {r['ai_dead_per_1000']} / human {r['human_dead_per_1000']} per 1,000")
+                  f"AI {_n(r['ai_dead_per_1000'])} / human {_n(r['human_dead_per_1000'])} per 1,000")
         return 0
 
     if args.cmd != "scan":
