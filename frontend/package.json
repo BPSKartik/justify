@@ -1,0 +1,12 @@
+{
+  "name": "justify-frontend",
+  "private": true,
+  "description": "Builds the 3D code city for the hosted page: frontend/city.js -> justify/hosted/static/city.js",
+  "scripts": {
+    "build": "esbuild city.js --bundle --format=esm --minify --target=es2020 --legal-comments=eof --outfile=../justify/hosted/static/city.js"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12",
+    "three": "0.186.1"
+  }
+}

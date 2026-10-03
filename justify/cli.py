@@ -71,8 +71,8 @@ def _print_summary(res) -> None:
             print("  Assistants            " + ", ".join(f"{k} {v}" for k, v in a["tools"].items()))
         h = a.get("history") or {}
         if h.get("thin"):
-            print(f"  History               thin: {h['commits']} commit(s), the largest added {h['largest_commit_percent']}% "
-                  "of all lines — it cannot show how this code was written")
+            print(f"  History               thin: {h['commits']} commit(s); one wrote {h['largest_commit_percent']}% of "
+                  "today's lines — it cannot show how this code was written")
         if m["jlr_percent"] is not None:
             print(f"  Dead weight / 1,000   AI-assisted {a['ai_dead_per_1000']}   ·   human {a['human_dead_per_1000']}"
                   + (f"   ·   ratio {a['ai_to_human_ratio']}×" if a["ai_to_human_ratio"] is not None else ""))

@@ -62,7 +62,7 @@ def summarize(result: dict) -> dict:
         "ai_commits": a.get("ai_commits"), "commits": a.get("commits"),
         "tools": a.get("tools") or {}, "thin_history": bool((a.get("history") or {}).get("thin")),
         "traced": bool(a),
-        "languages": [{"name": l["name"], "lines": l["lines"]} for l in langs[:5]],
+        "languages": [{"name": l["name"], "lines": l["lines"], "audit": l.get("audit")} for l in langs[:8]],
         "code_lines": sum(l["lines"] for l in code_langs),
     }
 

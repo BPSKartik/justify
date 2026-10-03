@@ -97,7 +97,7 @@ def _consent_page(client: dict, user: dict, req_id: str, csrf: str, redirect_uri
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect {name} to Justify</title>
 <link rel="icon" href="/static/favicon.svg"><link rel="stylesheet" href="/static/styles.css"></head>
 <body class="plain"><main class="consent">
-<svg class="consent-mark" viewBox="0 0 64 64" aria-hidden="true"><use href="/static/logo.svg#m"></use></svg>
+<img class="consent-mark" src="/static/favicon.svg" alt="" width="44" height="44">
 <h1><strong>{name}</strong> wants to use Justify as <strong>{who}</strong></h1>
 <p class="consent-host">It will send you back to <code>{host}</code>.</p>
 <ul class="consent-list">
@@ -604,7 +604,8 @@ def _stats(rows: list[dict]) -> dict:
     jlrs = []
     for s in latest.values():
         for lang in s.get("languages") or []:
-            langs[lang["name"]] = langs.get(lang["name"], 0) + lang["lines"]
+            if lang.get("audit", "full") in ("full", "copies"):          # code, not docs or data
+                langs[lang["name"]] = langs.get(lang["name"], 0) + lang["lines"]
         for k, v in (s.get("tools") or {}).items():
             tools[k] = tools.get(k, 0) + v
         ai += s.get("ai_lines") or 0

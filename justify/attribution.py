@@ -263,30 +263,25 @@ class Attribution:
         c = Counter(self._commit_tool[s] for s in out.split() if s in self._commit_tool)
         return dict(c.most_common())
 
-    def history_shape(self) -> dict | None:
-        """How the code arrived. When one commit added most of what is there, the history cannot
-        say how it was written — whoever or whatever wrote it — and the page should say so plainly
-        rather than report "100% human"."""
-        out = _git(self.root, "log", "HEAD", "--no-merges", "--numstat", "--format=%x01%H")
-        if not out:
+    def history_shape(self, files: list[str]) -> dict | None:
+        """How the code that exists today arrived, read from the blame already taken (no extra git
+        call — a diff of every commit would fetch every large file a partial clone left behind).
+        When one commit wrote most of today's lines, the history cannot say how they were written,
+        and the page says so plainly rather than report "100% human"."""
+        c: Counter = Counter()
+        for rel in files:
+            for sha in self._file_shas(rel):
+                if sha:
+                    c[sha] += 1
+        total = sum(c.values())
+        if not total:
             return None
-        added: list[int] = []
-        for c in out.split("\x01"):
-            if not c.strip():
-                continue
-            n = 0
-            for row in c.split("\n")[1:]:
-                parts = row.split("\t")
-                if len(parts) == 3 and parts[0].isdigit():
-                    n += int(parts[0])
-            added.append(n)
-        total = sum(added)
-        if not added or not total:
-            return None
-        biggest = max(added)
-        return {"commits": len(added), "lines_added": total, "largest_commit_lines": biggest,
+        biggest = c.most_common(1)[0][1]
+        out = _git(self.root, "rev-list", "--count", "HEAD")
+        commits = int(out.strip()) if out and out.strip().isdigit() else len(c)
+        return {"commits": commits, "lines_today": total, "largest_commit_lines": biggest,
                 "largest_commit_percent": round(100.0 * biggest / total, 1),
-                "thin": len(added) <= 2 or biggest / total >= 0.8}
+                "thin": commits <= 2 or biggest / total >= 0.8}
 
     def ai_commits(self) -> tuple[int, int]:
         out = _git(self.root, "log", "--format=%H")

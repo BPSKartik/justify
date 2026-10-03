@@ -83,3 +83,15 @@ def test_a_repository_without_python_still_gets_an_audit(tmp_path):
     assert [l["name"] for l in res.languages] == ["TypeScript", "Markdown"]
     assert {r["path"] for r in res.files_detail} == {"lib/a.ts", "lib/b.ts"}
     assert next(r for r in res.files_detail if r["path"] == "lib/b.ts")["dup"] > 0
+
+
+def test_a_history_of_one_commit_is_called_thin_not_human(tmp_path):
+    import subprocess
+    env = {"GIT_AUTHOR_NAME": "a", "GIT_AUTHOR_EMAIL": "a@a", "GIT_COMMITTER_NAME": "a", "GIT_COMMITTER_EMAIL": "a@a",
+           "PATH": __import__("os").environ["PATH"]}
+    _write(tmp_path, {"train.py": "import json\nprint(json.dumps({}))\n", "predict.py": "print(1)\n"})
+    for args in (["init", "-q"], ["add", "-A"], ["commit", "-qm", "everything"]):
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True, env=env)
+    a = run(tmp_path, record=False).metrics["attribution"]
+    assert a["history"]["thin"] and a["history"]["largest_commit_percent"] == 100.0
+    assert a["tools"] == {} and a["all_code"] == {"ai_lines": 0, "human_lines": 3}

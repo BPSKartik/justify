@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard — Justify</title>
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#12233f">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Condensed:wght@600;700&display=swap">
+<link rel="stylesheet" href="/static/styles.css">
+<script src="/static/common.js" defer></script>
+<script src="/static/dashboard.js" defer></script>
+</head>
+<body class="dash">
+<a class="skip" href="#main">Skip to content</a>
+<svg width="0" height="0" class="defs" aria-hidden="true">
+  <symbol id="mark" viewBox="0 0 64 64">
+    <rect class="m-bar" x="12" y="6" width="43" height="8" rx="4"/><rect class="m-bar" x="37" y="17" width="18" height="8" rx="4"/>
+    <rect class="m-dead" x="44" y="28" width="18" height="8" rx="4"/><rect class="m-bar" x="37" y="39" width="18" height="8" rx="4"/>
+    <rect class="m-bar" x="7" y="39" width="11" height="8" rx="4"/><rect class="m-bar" x="9" y="50" width="46" height="8" rx="4"/>
+  </symbol>
+</svg>
+
+<header class="top">
+  <div class="wrap top-row">
+    <a class="brand" href="/" aria-label="Justify, home"><svg class="mark" aria-hidden="true"><use href="#mark"/></svg><span>Justify</span></a>
+    <nav aria-label="Dashboard sections">
+      <a href="#overview">Overview</a>
+      <a href="#repos">Repositories</a>
+      <a href="#history">History</a>
+      <a href="#tokens">AI apps &amp; tokens</a>
+    </nav>
+    <div class="auth-slot" id="auth-slot"></div>
+  </div>
+</header>
+
+<main id="main">
+  <section class="dash-hero" id="overview" aria-labelledby="hello">
+    <div class="wrap dash-hero-grid">
+      <div class="hello">
+        <span id="me-avatar"></span>
+        <div>
+          <p class="eyebrow" id="me-plan">Your dashboard</p>
+          <h1 id="hello">Your audits</h1>
+          <p class="meta-hero" id="me-since"></p>
+        </div>
+      </div>
+      <div class="allow" id="allow" aria-live="polite">
+        <svg class="ring" viewBox="0 0 120 120" aria-hidden="true"><circle cx="60" cy="60" r="50" class="ring-track"/><circle cx="60" cy="60" r="50" class="ring-fill" id="ring-fill"/></svg>
+        <div class="allow-text"><b id="allow-left">—</b><span id="allow-label">audits left today</span><small id="allow-reset"></small></div>
+      </div>
+      <form class="quick" id="quick" novalidate>
+        <label for="quick-repo">Audit a repository</label>
+        <div class="field">
+          <input id="quick-repo" type="text" placeholder="owner/repository or a GitHub URL" autocomplete="off" autocapitalize="off" spellcheck="false">
+          <button type="submit" id="quick-btn">Audit</button>
+        </div>
+        <p class="quick-note"><a href="/?upload=1">Or audit your own code →</a></p>
+        <p class="field-error" id="quick-error" role="alert" hidden></p>
+      </form>
+    </div>
+  </section>
+
+  <section class="wrap dash-body">
+    <div class="stats" id="stats" aria-label="Totals"></div>
+
+    <div class="dash-grid">
+      <div class="panel">
+        <div class="panel-head"><h2>Activity</h2><p class="meta">Audits you asked for, last 30 days</p></div>
+        <div id="activity" class="activity" role="img"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h2>What you audit</h2><p class="meta">Lines, latest audit of each repository</p></div>
+        <div id="langs" class="dash-langs"></div>
+        <h3 class="sub">Assistants seen in your repositories</h3>
+        <div id="assistants" class="tools"></div>
+      </div>
+    </div>
+
+    <div class="panel" id="repos">
+      <div class="panel-head"><h2>Repositories</h2><p class="meta">Each repository's latest audit, its trend, and what changed since the one before</p></div>
+      <div class="table-wrap"><table class="dtable" id="repo-table">
+        <thead><tr><th scope="col">Repository</th><th scope="col">Justified Line Ratio</th><th scope="col">Trend</th><th scope="col">Dead weight</th><th scope="col">Copies</th><th scope="col">AI-signed</th><th scope="col">Audits</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+      <p class="empty" id="repos-empty" hidden>No finished audits yet. Audit a repository above — it will show up here, and every audit after it shows what changed.</p>
+    </div>
+
+    <div class="panel compare-panel" id="compare" hidden aria-live="polite">
+      <div class="panel-head"><h2 id="cmp-title">What changed</h2><button type="button" class="ghost" id="cmp-close">Close</button></div>
+      <div class="cmp-numbers" id="cmp-numbers"></div>
+      <div class="cmp-lists">
+        <div><h3 class="sub good">Fixed since the previous audit</h3><ol class="cmp-list" id="cmp-resolved"></ol></div>
+        <div><h3 class="sub bad">New since the previous audit</h3><ol class="cmp-list" id="cmp-new"></ol></div>
+      </div>
+    </div>
+
+    <div class="panel" id="history">
+      <div class="panel-head"><h2>History</h2><p class="meta" id="history-meta"></p></div>
+      <div class="table-wrap"><table class="dtable" id="history-table">
+        <thead><tr><th scope="col">What</th><th scope="col">When</th><th scope="col">From</th><th scope="col">Result</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+      <p class="more"><button type="button" class="ghost" id="history-more" hidden>Show more</button></p>
+    </div>
+
+    <div class="panel" id="tokens">
+      <div class="panel-head"><h2>AI apps &amp; tokens</h2><p class="meta">How your AI assistants reach Justify as you</p></div>
+      <div class="endpoint"><code id="mcp-url"></code><button type="button" class="ghost copy" id="mcp-copy">Copy</button></div>
+      <p class="meta">Add this URL to Claude, ChatGPT, Copilot, Cursor or Gemini CLI; the app sends you here to approve it once. Setup for each app is on the <a href="/#connect">home page</a>.</p>
+      <div class="two">
+        <div>
+          <h3 class="sub">Connected apps</h3>
+          <ul class="plain-list" id="apps"></ul>
+        </div>
+        <div>
+          <h3 class="sub">Personal tokens</h3>
+          <p class="meta">For tools that take a header instead of signing in: <code>Authorization: Bearer jst_…</code>. A token is shown once.</p>
+          <form class="token-form" id="token-form">
+            <label for="token-name" class="sr-only">Token name</label>
+            <input id="token-name" type="text" maxlength="60" placeholder="What is it for? e.g. Claude Code on my laptop">
+            <button type="submit" class="btn-primary">Create token</button>
+          </form>
+          <div class="token-once" id="token-once" hidden>
+            <p><b>Copy it now</b> — Justify keeps only a fingerprint and cannot show it again.</p>
+            <pre class="code"><code id="token-value"></code><button type="button" class="ghost copy" id="token-copy">Copy</button></pre>
+          </div>
+          <ul class="plain-list" id="token-list"></ul>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-grid">
+    <div class="foot-brand"><svg class="mark" aria-hidden="true"><use href="#mark"/></svg><div><b>Justify</b><span>Every line earns its place.</span></div></div>
+    <ul class="foot-links">
+      <li><a href="/">Audit a repository</a></li>
+      <li><a href="https://github.com/BPSKartik/justify" rel="noopener">Source on GitHub</a></li>
+      <li><a href="/health">Status</a></li>
+    </ul>
+    <p class="foot-note">Team Error 404 · Microsoft Innovate 2026 · Bennett University</p>
+  </div>
+</footer>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

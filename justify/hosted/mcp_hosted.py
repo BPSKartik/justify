@@ -122,8 +122,8 @@ def compact(scan: dict, base_url: str) -> dict:
         out["note"] = ("No Python here, so there is no dead-code audit; other languages were checked for copied blocks. "
                        + out["note"])
     if hist.get("thin"):
-        out["authorship_caveat"] = (f"{hist['largest_commit_percent']}% of all lines arrived in one commit, so the "
-                                    "history cannot show how this code was written.")
+        out["authorship_caveat"] = (f"One commit wrote {hist['largest_commit_percent']}% of the lines that exist "
+                                    "today, so the history cannot show how this code was written.")
     return out
 
 

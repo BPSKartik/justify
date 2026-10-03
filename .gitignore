@@ -11,3 +11,4 @@ venv/
 .env
 .justify/
 .DS_Store
+node_modules/

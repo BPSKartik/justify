@@ -56,8 +56,43 @@ from the first AI-assisted commit, and newer code has had less time to be rewrit
 
 ## Use it in the browser
 
-**https://justify.xeta.in** — paste a public GitHub repository and watch it audited. The hosted
-service reads code only: it never runs the repository or its tests, and never calls a model.
+**https://justify.xeta.in** — paste a public GitHub repository, or drop your own code, and watch it
+audited. Every result is drawn as a 3D city of the repository — one tower per file, coral floors for
+dead weight, gold for copies, violet for AI-signed lines — next to the line items.
+
+- **Any language gets an audit.** Python gets the full dead-code audit; JavaScript, TypeScript, Go,
+  Java, C, C++, C#, Rust and 20 more are checked for copied blocks; every repository gets a census of
+  what it is made of and who wrote it.
+- **Who wrote it** comes from the signatures assistants leave in commits — `Co-Authored-By` trailers,
+  "Generated with" lines, and the accounts agents commit as (Copilot coding agent, Devin, Jules,
+  Cursor Agent, Aider). Code pasted from a chat window has no signature; it is reported as *no AI
+  trace*, never as human, and a history too thin to tell is said to be.
+- **Accounts** (GitHub or Microsoft sign-in, public profile only): a history of your audits with
+  trends and *what changed since the last audit*, a daily allowance, private uploads of your own
+  code (deleted after the audit; results visible only to you), connected AI apps and personal tokens.
+- **MCP with sign-in.** AI apps connect with standard OAuth (dynamic client registration, PKCE) or a
+  personal token, and get a fix plan, file by file. Tools: `scan_github_repo`, `audit_code`,
+  `get_scan_result`, `my_audits`.
+
+The hosted service reads code only: it never runs the code or its tests, and never calls a model.
+
+### Running the hosted service
+
+`justify serve` runs it all in one process (`pip install ".[hosted]"`). Settings, by name:
+
+| Setting | What it does |
+|---|---|
+| `JUSTIFY_PUBLIC_URL`, `JUSTIFY_PUBLIC_HOSTS` | the site's own address (OAuth issuer, links) and host names |
+| `JUSTIFY_GITHUB_CLIENT_ID`, `JUSTIFY_GITHUB_CLIENT_SECRET` | turn on "Sign in with GitHub" (callback `/auth/github/callback`) |
+| `JUSTIFY_MICROSOFT_CLIENT_ID`, `JUSTIFY_MICROSOFT_CLIENT_SECRET`, `JUSTIFY_MICROSOFT_TENANT` | turn on "Sign in with Microsoft" (callback `/auth/microsoft/callback`) |
+| `JUSTIFY_ANON_DAILY`, `JUSTIFY_USER_DAILY`, `JUSTIFY_USER_CONCURRENT` | new audits a day without / with an account; audits running at once |
+| `JUSTIFY_ADMINS` | accounts with no daily cap, e.g. `github:BPSKartik` |
+| `JUSTIFY_MCP_AUTH` | `required` (default once sign-in is on) or `off` |
+| `JUSTIFY_BLOB_URL` | a Blob container the database and results are mirrored to, through the app's managed identity — no storage key |
+
+With no sign-in provider set, the service runs without accounts, as before. The 3D city is built
+from `frontend/city.js` (`cd frontend && npm ci && npm run build`); the built file is committed, so
+the container needs no Node.
 
 ## Install
 
@@ -205,7 +240,7 @@ The report lands in the job summary. See `examples/justify-workflow.yml`.
 
 ## Limits
 
-- Python only for now; the parser layer is built to take tree-sitter for other languages.
+- Dead code is found in Python only; other languages get copied blocks, a census and authorship.
 - Methods are not judged — they are called through objects in ways a static graph cannot see.
 - Removing a dependency cannot be proved without a clean install, so dependencies are reported, not removed.
 - Passing tests prove behaviour is unchanged, not that the code is better; weak tests mean weak proof.

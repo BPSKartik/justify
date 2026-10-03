@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in — Justify</title>
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#12233f">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Condensed:wght@600;700&display=swap">
+<link rel="stylesheet" href="/static/styles.css">
+<script src="/static/common.js" defer></script>
+<script src="/static/signin.js" defer></script>
+</head>
+<body class="plain">
+<main class="consent signin-card" id="main">
+  <a href="/" aria-label="Justify, home"><img class="consent-mark" src="/static/favicon.svg" alt="" width="44" height="44"></a>
+  <h1 id="signin-title">Sign in to Justify</h1>
+  <p class="consent-host" id="signin-why">Keep a history of your audits, see how they change, audit your own code privately, and connect your AI apps.</p>
+  <div class="providers" id="providers"></div>
+  <p class="signin-error" id="signin-error" role="alert" hidden></p>
+  <p class="signin-fine">Justify reads your public profile — name, username and picture — and nothing else. It never asks for access to your repositories, and it never sees a password.</p>
+  <p class="signin-fine" id="no-accounts" hidden>Accounts are not switched on for this server yet. Everything else works without one.</p>
+</main>
+<a class="back-home" href="/">Back to Justify</a>
+</body>
+</html>

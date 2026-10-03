@@ -124,7 +124,7 @@ def _payoff(findings: list[Finding], total_lines: int, att: Attribution, files: 
             "rework": att.rework(files),
             "all_code": {"ai_lines": everywhere.get("ai", 0), "human_lines": everywhere.get("human", 0)},
             "tools": att.tools(),
-            "history": att.history_shape(),
+            "history": att.history_shape([f for f in (code_files or files) if f in att._blame]),
             "note": "AI-assisted means the commit carries an assistant's signature: a Co-Authored-By or "
                     "Assisted-by trailer, a 'Generated with' line, or an agent's own account (Copilot coding "
                     "agent, Devin, Jules, Cursor Agent, Aider). Code pasted from a chat window carries no "
@@ -192,7 +192,7 @@ def run(root: str | pathlib.Path, *, model: Model | None = None, prove_command: 
     if len(code_rels) <= BLAME_ALL_UP_TO:
         blame += code_rels
     att.prefetch(list(dict.fromkeys(blame)))  # every Python file is blamed for the AI/human counts anyway
-    stage("attribution", "every line traced to an AI-assisted or a human commit" if att.enabled
+    stage("attribution", "every line traced: an AI-signed commit, or no AI trace" if att.enabled
           else "not a git repository: authorship skipped")
     for f in findings + other:
         f.authored_by = att.span(f.file, f.line, f.end_line) if f.kind != "dependency" else "n/a"

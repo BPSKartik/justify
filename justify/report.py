@@ -30,8 +30,8 @@ def _attr_line(m: dict) -> str:
         parts.append("Assistants that signed commits: " + ", ".join(f"{k} ({v})" for k, v in a["tools"].items()))
     h = a.get("history") or {}
     if h.get("thin"):
-        parts.append(f"History is thin — {h['commits']} commit(s), the largest added {h['largest_commit_percent']}% "
-                     "of all lines — so it cannot show how this code was written.")
+        parts.append(f"History is thin — {h['commits']} commit(s); one commit wrote {h['largest_commit_percent']}% "
+                     "of the lines that exist today — so it cannot show how this code was written.")
     if a["ai_dead_per_1000"] is not None or a["human_dead_per_1000"] is not None:
         parts.append(f"Dead weight per 1,000 lines — AI-assisted: **{a['ai_dead_per_1000']}**, "
                      f"human: **{a['human_dead_per_1000']}**")
@@ -60,7 +60,7 @@ def markdown(res) -> str:
         p = res.proof
         out += [f"**Proof:** `{p['command']}` — {p.get('passed', 0)} of {p.get('candidates', 0)} removals "
                 f"pass the tests ({p.get('batch')}).", ""]
-    out += ["### Who wrote the dead weight", "", _attr_line(m), ""]
+    out += ["### Who wrote it", "", _attr_line(m), ""]
     if remove:
         out += ["### Remove", "", "| Where | What | Why | Proof | Written by |", "|---|---|---|---|---|"]
         for f in remove:
