@@ -482,6 +482,21 @@ def create_app(jobs: Jobs | None = None, ghapp=None) -> Starlette:
         return JSONResponse({"user": user, "csrf": csrf, "usage": usage, "audits": count, "via": how,
                              "providers": providers}, headers={"Cache-Control": "no-store"})
 
+    async def my_signins(request: Request) -> Response:
+        user, _, how, bad = await who(request, mutate=request.method != "GET")
+        if bad or (bad := need_user(user)):
+            return bad
+        if request.method == "DELETE":
+            if how != "session":
+                return err("Change sign-ins from the dashboard.", 403, "session")
+            out = await run_in_threadpool(accounts.unlink, user["id"], request.path_params["provider"])
+            if out == "last":
+                return err("This is your only way to sign in. Connect another first, or delete the account.", 409, "last")
+            return JSONResponse({"ok": out == "removed"}, status_code=200 if out == "removed" else 404)
+        mine = set(await run_in_threadpool(accounts.identities, user["id"]))
+        return JSONResponse({"signins": [{"key": k, "label": p.label, "connected": k in mine}
+                                         for k, p in providers.items()]}, headers={"Cache-Control": "no-store"})
+
     async def delete_me(request: Request) -> Response:
         user, _, how, bad = await who(request, mutate=True)
         if bad or (bad := need_user(user)):
@@ -588,7 +603,13 @@ def create_app(jobs: Jobs | None = None, ghapp=None) -> Starlette:
             return resp
         if key not in providers:
             return _message_page("Not available", "That sign-in option is not switched on here.", 404)
-        url, state = await run_in_threadpool(login.start, key, nxt)
+        link_user = None
+        if request.query_params.get("link") == "1":            # connect another sign-in to this account
+            user, _, how, _ = await who(request)
+            if user is None or how != "session":
+                return RedirectResponse(f"/signin?next={quote('/dashboard#account')}", status_code=303)
+            link_user, nxt = user["id"], "/dashboard#account"
+        url, state = await run_in_threadpool(login.start, key, nxt, link_user)
         resp = RedirectResponse(url, status_code=302)
         resp.set_cookie(STATE_COOKIE, state, max_age=600, httponly=True, secure=secure_cookies, samesite="lax",
                         path="/auth")
@@ -602,8 +623,20 @@ def create_app(jobs: Jobs | None = None, ghapp=None) -> Starlette:
         if q.get("error"):
             return RedirectResponse(f"/signin?error={quote('Sign-in was cancelled.')}", status_code=303)
         try:
-            subject, profile, nxt = await run_in_threadpool(login.finish, key, q.get("code", ""), q.get("state", ""),
-                                                            request.cookies.get(STATE_COOKIE))
+            subject, profile, nxt, link_user = await run_in_threadpool(
+                login.finish, key, q.get("code", ""), q.get("state", ""), request.cookies.get(STATE_COOKIE))
+            if link_user:
+                # only the account that asked, still signed in in this browser, gets the new sign-in
+                current, _, how, _ = await who(request)
+                if current is None or how != "session" or current["id"] != link_user:
+                    raise LoginError("sign in again, then connect from your dashboard")
+                outcome = await run_in_threadpool(accounts.link, link_user, key, subject, profile)
+                print(json.dumps({"event": "link", "provider": key, "user": link_user, "outcome": outcome}), flush=True)
+                note = accounts.LINK_MESSAGES[outcome].format(label=providers[key].label)
+                resp = RedirectResponse(f"/dashboard?{'linked' if outcome in ('linked', 'moved', 'already') else 'link_error'}="
+                                        f"{quote(note)}#account", status_code=303)
+                resp.delete_cookie(STATE_COOKIE, path="/auth")
+                return resp
             user = await run_in_threadpool(accounts.sign_in, key, subject, profile)
         except LoginError as exc:
             return RedirectResponse(f"/signin?error={quote(str(exc).capitalize())}", status_code=303)
@@ -691,6 +724,8 @@ def create_app(jobs: Jobs | None = None, ghapp=None) -> Starlette:
         Route("/api/me/tokens/{token_id}", revoke_token, methods=["DELETE"]),
         Route("/api/me/apps", apps),
         Route("/api/me/apps/{client_id}", apps, methods=["DELETE"]),
+        Route("/api/me/signins", my_signins),
+        Route("/api/me/signins/{provider}", my_signins, methods=["DELETE"]),
         Route("/auth/logout", logout, methods=["POST"]),
         Route("/auth/{provider}/start", auth_start),
         Route("/auth/{provider}/callback", auth_callback),

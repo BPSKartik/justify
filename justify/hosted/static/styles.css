@@ -699,3 +699,13 @@ body.plain { min-height: 100vh; background: radial-gradient(900px 520px at 75% -
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
   .reveal { opacity: 1; transform: none; }
 }
+
+/* dashboard · ways to sign in */
+.signins-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; flex-wrap: wrap;
+  padding: 4px 0 18px; margin-bottom: 18px; border-bottom: 1px solid var(--line); }
+.signins-row h3 { margin: 0 0 4px; font-size: 15px; }
+.signins { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; min-width: min(420px, 100%); }
+.signins li { display: grid; grid-template-columns: auto auto 1fr auto; align-items: center; gap: 10px;
+  padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.signins .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line-2); }
+.signins .dot.on { background: var(--green); }

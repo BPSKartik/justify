@@ -285,6 +285,27 @@
     loadTokens();
   }
 
+  /* ---------------------------------------------------------------- ways to sign in */
+  async function loadSignins() {
+    const { status, body } = await api("/api/me/signins");
+    const list = $("signins");
+    list.replaceChildren();
+    if (status !== 200 || !body) return;
+    const connected = body.signins.filter((s) => s.connected).length;
+    for (const s of body.signins) {
+      const action = s.connected
+        ? (connected > 1 ? el("button", { type: "button", class: "btn-ghost small", onclick: async () => {
+            if (!window.confirm(`Disconnect ${s.label}? You will no longer be able to sign in with it.`)) return;
+            const r = await api(`/api/me/signins/${encodeURIComponent(s.key)}`, { method: "DELETE" });
+            if (r.status === 200) { toast(`${s.label} disconnected`); loadSignins(); }
+            else toast((r.body && r.body.error) || "Could not disconnect it");
+          } }, "Disconnect") : el("span", { class: "meta", text: "Your only sign-in" }))
+        : el("a", { class: "btn-primary small", href: `/auth/${encodeURIComponent(s.key)}/start?link=1` }, `Connect ${s.label}`);
+      list.append(el("li", {}, el("span", { class: s.connected ? "dot on" : "dot" }),
+        el("b", { text: s.label }), el("span", { class: "meta", text: s.connected ? "connected" : "not connected" }), action));
+    }
+  }
+
   /* ---------------------------------------------------------------- start */
   async function init() {
     const me = await J.renderAuth();
@@ -315,6 +336,13 @@
     loadHistory(false);
     loadApps();
     loadTokens();
+    loadSignins();
+    const back = new URLSearchParams(location.search);       // returning from connecting a sign-in
+    const note = back.get("linked") || back.get("link_error");
+    if (note) {
+      toast(note, 8000);
+      history.replaceState(null, "", location.pathname + location.hash);
+    }
     const deep = location.hash.match(/^#compare=(.+)$/);
     if (deep) {                                   // a link straight to "what changed" for one repository
       const repo = decodeURIComponent(deep[1]);

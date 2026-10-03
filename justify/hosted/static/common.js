@@ -39,13 +39,13 @@
   };
 
   let toastTimer;
-  function toast(msg) {
+  function toast(msg, ms = 2600) {
     const t = $("toast");
     if (!t) return;
     t.textContent = msg;
     t.hidden = false;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { t.hidden = true; }, 2600);
+    toastTimer = setTimeout(() => { t.hidden = true; }, ms);
   }
   async function copy(text, what) {
     try { await navigator.clipboard.writeText(text); toast(`${what} copied`); }

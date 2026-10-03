@@ -267,6 +267,68 @@ class Accounts:
     def identities(self, user_id: str) -> list[str]:
         return [r["provider"] for r in self.db.all("SELECT provider FROM identities WHERE user_id=?", (user_id,))]
 
+    LINK_MESSAGES = {
+        "linked": "{label} is connected. Either sign-in now opens this account.",
+        "already": "{label} was already connected to this account.",
+        "moved": "{label} is connected. The empty account it had made on its own is gone.",
+        "taken": "That {label} account already has its own Justify account with audits or tokens. Sign in with "
+                 "{label}, delete that account from its dashboard, then connect {label} here.",
+        "other": "This account already has a different {label} sign-in. Disconnect it first.",
+    }
+
+    def link(self, user_id: str, provider: str, subject: str, profile: dict) -> str:
+        """Add a sign-in to an account, so either way in opens the same history. Returns linked, already,
+        moved (it had made an account of its own with nothing in it, which is folded in and erased),
+        taken (that account has history: never merged silently) or other (this account already has a
+        different identity from the same provider)."""
+        login = (profile.get("login") or "")[:80] if provider in ("github", "dev") else None
+        with self.db.transaction() as tx:
+            row = tx.execute("SELECT user_id FROM identities WHERE provider=? AND subject=?",
+                             (provider, subject)).fetchone()
+            if row and row["user_id"] == user_id:
+                return "already"
+            mine = tx.execute("SELECT subject FROM identities WHERE provider=? AND user_id=?",
+                              (provider, user_id)).fetchone()
+            if mine:
+                return "other"
+            outcome = "linked"
+            if row:
+                other = row["user_id"]
+                ways_in = tx.execute("SELECT COUNT(*) AS n FROM identities WHERE user_id=?", (other,)).fetchone()["n"]
+                busy = ways_in > 1 or any(
+                    tx.execute(f"SELECT 1 FROM {table} WHERE user_id=? LIMIT 1", (other,)).fetchone()
+                    for table in ("user_scans", "tokens", "github_installations")) \
+                    or tx.execute("SELECT 1 FROM scans WHERE owner=? LIMIT 1", (other,)).fetchone()
+                if busy:
+                    return "taken"
+                for table in ("sessions", "oauth_codes", "identities"):
+                    tx.execute(f"DELETE FROM {table} WHERE user_id=?", (other,))
+                tx.execute("DELETE FROM usage WHERE who=?", (f"u:{other}",))
+                tx.execute("DELETE FROM users WHERE id=?", (other,))
+                outcome = "moved"
+            tx.execute("INSERT INTO identities (provider, subject, user_id, created) VALUES (?,?,?,?)",
+                       (provider, subject, user_id, time.time()))
+            if login:
+                tx.execute("UPDATE users SET login=? WHERE id=?", (login, user_id))
+            if provider == "github" and str(profile.get("avatar") or "").startswith("https://"):
+                tx.execute("UPDATE users SET avatar=COALESCE(avatar, ?) WHERE id=?", (profile["avatar"], user_id))
+        return outcome
+
+    def unlink(self, user_id: str, provider: str) -> str:
+        """Remove one way in. The last one stays: deleting the account is how to leave entirely.
+        Disconnecting GitHub also drops the GitHub username and any private-repository access."""
+        with self.db.transaction() as tx:
+            n = tx.execute("SELECT COUNT(*) AS n FROM identities WHERE user_id=?", (user_id,)).fetchone()["n"]
+            if not tx.execute("SELECT 1 FROM identities WHERE user_id=? AND provider=?", (user_id, provider)).fetchone():
+                return "missing"
+            if n <= 1:
+                return "last"
+            tx.execute("DELETE FROM identities WHERE user_id=? AND provider=?", (user_id, provider))
+            if provider == "github":
+                tx.execute("DELETE FROM github_installations WHERE user_id=?", (user_id,))
+                tx.execute("UPDATE users SET login=NULL WHERE id=?", (user_id,))
+        return "removed"
+
     def usage(self, user: dict | None, ip: str = "", channel: str = "web") -> dict:
         row = self.db.one("SELECT n FROM usage WHERE who=? AND day=?", (self._who(user, ip, channel), today()))
         limit = self.quotas.daily(user, channel)

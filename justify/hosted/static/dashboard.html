@@ -55,7 +55,7 @@
       <form class="quick" id="quick" novalidate>
         <label for="quick-repo">Audit a repository</label>
         <div class="field">
-          <input id="quick-repo" type="text" placeholder="owner/repository or a GitHub URL" autocomplete="off" autocapitalize="off" spellcheck="false">
+          <input id="quick-repo" type="text" placeholder="owner/repo or GitHub URL" autocomplete="off" autocapitalize="off" spellcheck="false">
           <button type="submit" id="quick-btn" class="btn-primary">Audit</button>
         </div>
         <p class="quick-note"><a href="/?repos=1">Pick from your repositories</a> · <a href="/?upload=1">audit your own code</a></p>
@@ -135,6 +135,13 @@
 
     <div class="panel danger" id="account">
       <div class="panel-head"><h2>Your account</h2><p class="meta"><a href="/privacy">What Justify keeps, and why</a></p></div>
+      <div class="signins-row">
+        <div>
+          <h3>Ways to sign in</h3>
+          <p class="meta">Connect both, and either one opens this account and its history.</p>
+        </div>
+        <ul class="signins" id="signins"></ul>
+      </div>
       <div class="danger-row">
         <p>Delete your account: your profile, history, tokens, connected apps and every private audit, at once. Audits of public repositories stay, without your name.</p>
         <button type="button" class="btn-danger" id="delete-account">Delete my account</button>

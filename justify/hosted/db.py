@@ -77,6 +77,8 @@ class Database:
                 db.execute("ALTER TABLE scans ADD COLUMN sealed INTEGER NOT NULL DEFAULT 0")
             if "inst" not in have:
                 db.execute("ALTER TABLE scans ADD COLUMN inst INTEGER")
+            if "link_user" not in {r["name"] for r in db.execute("PRAGMA table_info(login_states)")}:
+                db.execute("ALTER TABLE login_states ADD COLUMN link_user TEXT")
 
     def connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.path, timeout=30, isolation_level=None)

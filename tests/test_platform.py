@@ -436,3 +436,90 @@ def test_private_repositories_need_the_app_on_your_own_account_and_are_sealed(tm
         assert result["github_blob_base"].startswith("https://github.com/octo/secret/blob/")
         assert mallory.get(f"/api/scans/{done['id']}").status_code == 404
         assert done["id"] not in json.dumps(c.get("/api/recent").json())
+
+
+class _FakeProvider:
+    """A sign-in provider that answers from a table: code -> (subject, profile)."""
+
+    def __init__(self, key, label, people):
+        self.key, self.label, self.people = key, label, people
+
+    def authorize_url(self, redirect_uri, state, challenge, nonce):
+        return f"https://{self.key}.example/authorize?state={state}"
+
+    def profile(self, code, redirect_uri, verifier, nonce):
+        return self.people[code]
+
+
+def _round_trip(c, provider, code, link=False):
+    start = c.get(f"/auth/{provider}/start" + ("?link=1" if link else "?next=/dashboard"))
+    if start.status_code != 302:
+        return start
+    state = re.search(r"state=([^&]+)", start.headers["location"]).group(1)
+    return c.get(f"/auth/{provider}/callback?code={code}&state={state}")
+
+
+def test_one_account_can_be_opened_with_github_and_microsoft(tmp_path, monkeypatch):
+    for k, v in {"JUSTIFY_PUBLIC_URL": "http://localhost", "JUSTIFY_RATE_PER_HOUR": "500"}.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.delenv("JUSTIFY_PUBLIC_HOSTS", raising=False)
+    import justify.hosted.app as app_mod
+    gh = _FakeProvider("github", "GitHub", {"g-kartik": ("101", {"login": "kartik", "name": "Kartik"}),
+                                           "g-busy": ("202", {"login": "busy", "name": "Busy"})})
+    ms = _FakeProvider("microsoft", "Microsoft", {"m-kartik": ("tid:oid", {"login": "k@uni.edu", "name": "Kartik"})})
+    monkeypatch.setattr(app_mod, "providers_from_env", lambda: {"github": gh, "microsoft": ms})
+    app = app_mod.create_app(Jobs(str(tmp_path / "data"), workers=1))
+    with TestClient(app, base_url="http://localhost", follow_redirects=False) as c:
+        accounts = app.state.accounts
+        # signing in with GitHub first made an account of its own, with nothing in it yet
+        first = TestClient(app, base_url="http://localhost", follow_redirects=False)
+        assert _round_trip(first, "github", "g-kartik").status_code == 303
+        empty_id = first.get("/api/me").json()["user"]["id"]
+
+        # connecting needs a signed-in browser
+        assert _round_trip(c, "github", "g-kartik", link=True).headers["location"].startswith("/signin")
+
+        assert _round_trip(c, "microsoft", "m-kartik").status_code == 303
+        me = c.get("/api/me").json()
+        assert me["providers"] == ["microsoft"] and me["user"]["login"] is None
+        back = _round_trip(c, "github", "g-kartik", link=True)
+        assert back.status_code == 303 and "linked=" in back.headers["location"]
+        me = c.get("/api/me").json()
+        assert sorted(me["providers"]) == ["github", "microsoft"] and me["user"]["login"] == "kartik"
+        assert accounts.user(empty_id) is None                            # the empty one was folded in
+        assert first.get("/api/me").status_code == 401                    # and its session went with it
+        # either way in now opens the same account
+        again = TestClient(app, base_url="http://localhost", follow_redirects=False)
+        _round_trip(again, "github", "g-kartik")
+        assert again.get("/api/me").json()["user"]["id"] == me["user"]["id"]
+        from urllib.parse import unquote
+        assert "already connected" in unquote(_round_trip(c, "github", "g-kartik", link=True).headers["location"])
+
+        # an account with history is never merged silently
+        busy = accounts.sign_in("github", "202", {"login": "busy", "name": "Busy"})
+        accounts.db.write("INSERT INTO user_scans (user_id, scan_id, created, via) VALUES (?,?,?,?)",
+                          (busy["id"], "s_x", time.time(), "web"))
+        other = TestClient(app, base_url="http://localhost", follow_redirects=False)
+        other.cookies.set("jfy_session", accounts.new_session(accounts.sign_in("dev", "zed", {"login": "zed"})["id"])[0])
+        out = _round_trip(other, "github", "g-busy", link=True)
+        assert "link_error=" in out.headers["location"]
+        assert accounts.identities(busy["id"]) == ["github"]
+
+        # a link started by one account cannot be finished by another signed in meanwhile
+        start = c.get("/auth/github/start?link=1")
+        state = re.search(r"state=([^&]+)", start.headers["location"]).group(1)
+        c.cookies.set("jfy_session", accounts.new_session(busy["id"])[0])
+        stolen = c.get(f"/auth/github/callback?code=g-kartik&state={state}")
+        assert stolen.headers["location"].startswith("/signin?error=")
+        assert accounts.identities(busy["id"]) == ["github"]
+
+        # disconnecting: never the last way in; GitHub takes its username with it
+        c.cookies.set("jfy_session", accounts.new_session(me["user"]["id"])[0])
+        csrf = c.get("/api/me").json()["csrf"]
+        signins = c.get("/api/me/signins").json()["signins"]
+        assert {s["key"]: s["connected"] for s in signins} == {"github": True, "microsoft": True}
+        assert c.delete("/api/me/signins/github").status_code == 403                      # no CSRF header
+        assert c.delete("/api/me/signins/github", headers={"x-justify-csrf": csrf}).status_code == 200
+        me = c.get("/api/me").json()
+        assert me["providers"] == ["microsoft"] and me["user"]["login"] is None
+        assert c.delete("/api/me/signins/microsoft", headers={"x-justify-csrf": csrf}).status_code == 409
