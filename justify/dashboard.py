@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import html
 import json
 
@@ -81,3 +82,8 @@ if (c && d.length > 1) {{ const x = c.getContext('2d'); const w = c.width = c.of
   d.forEach((v, i) => {{ const px = i * (w / (d.length - 1)), py = h - (v - lo) / (hi - lo) * h;
     i ? x.lineTo(px, py) : x.moveTo(px, py); }}); x.stroke(); }}
 </script></body></html>"""
+
+
+def _plural(n: int, word: str) -> str:
+    """'1 unit', '2 units'."""
+    return f"{n} {word}" if n == 1 else f"{n} {word}s"
