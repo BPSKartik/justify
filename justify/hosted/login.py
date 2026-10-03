@@ -179,19 +179,21 @@ class LoginFlow:
     def redirect_uri(self, key: str) -> str:
         return f"{self.base_url}/auth/{key}/callback"
 
-    def start(self, key: str, next_path: str) -> tuple[str, str]:
-        """(URL to send the browser to, state value to pin in a cookie)."""
+    def start(self, key: str, next_path: str, link_user: str | None = None) -> tuple[str, str]:
+        """(URL to send the browser to, state value to pin in a cookie). With link_user, the identity that
+        comes back is added to that signed-in account instead of signing in."""
         p = self.providers[key]
         state, verifier, nonce = secrets.token_urlsafe(24), secrets.token_urlsafe(48), secrets.token_urlsafe(16)
         challenge = _b64url(hashlib.sha256(verifier.encode()).digest())
         now = time.time()
         self.db.write("DELETE FROM login_states WHERE created < ?", (now - STATE_TTL,))
-        self.db.write("INSERT INTO login_states (state, provider, verifier, nonce, next, created) VALUES (?,?,?,?,?,?)",
-                      (state, key, verifier, nonce, safe_next(next_path), now))
+        self.db.write("INSERT INTO login_states (state, provider, verifier, nonce, next, created, link_user) "
+                      "VALUES (?,?,?,?,?,?,?)", (state, key, verifier, nonce, safe_next(next_path), now, link_user))
         return p.authorize_url(self.redirect_uri(key), state, challenge, nonce), state
 
-    def finish(self, key: str, code: str, state: str, cookie_state: str | None) -> tuple[str, dict, str]:
-        """(subject, profile, next path). The state must match the one this browser started with."""
+    def finish(self, key: str, code: str, state: str, cookie_state: str | None) -> tuple[str, dict, str, str | None]:
+        """(subject, profile, next path, account to link to or None). The state must match the one this
+        browser started with."""
         if not code or not state or not cookie_state or not secrets.compare_digest(state, cookie_state):
             raise LoginError("this sign-in did not start in this browser — try again")
         row = self.db.one("SELECT * FROM login_states WHERE state=? AND provider=?", (state, key))
@@ -199,4 +201,4 @@ class LoginFlow:
         if not row or row["created"] < time.time() - STATE_TTL:
             raise LoginError("this sign-in took too long — try again")
         subject, profile = self.providers[key].profile(code, self.redirect_uri(key), row["verifier"], row["nonce"])
-        return subject, profile, row["next"]
+        return subject, profile, row["next"], row["link_user"]
