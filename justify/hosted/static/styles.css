@@ -709,3 +709,7 @@ body.plain { min-height: 100vh; background: radial-gradient(900px 520px at 75% -
   padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
 .signins .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line-2); }
 .signins .dot.on { background: var(--green); }
+@media (max-width: 560px) {
+  .signins li { grid-template-columns: auto auto 1fr; }
+  .signins li > :last-child { grid-column: 1 / -1; justify-self: start; }
+}
