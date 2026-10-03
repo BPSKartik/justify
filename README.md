@@ -134,6 +134,8 @@ skipped and every undecided unit stays.
   pass alone are run again together before any is certified.
 - **Asked for proof, only proof counts.** With `--prove`, anything that did not pass stays.
 - **The model never deletes.** It can veto a removal; it cannot force one. Invented evidence is discarded.
+- **An assistant cannot spend your model credits.** Over MCP, `judge=true` is ignored unless the server's
+  owner set `JUSTIFY_ALLOW_JUDGE=1`; the static verdicts come back either way.
 - **The AI cannot choose what runs.** Over MCP the test command comes from `JUSTIFY_TEST_COMMAND`,
   set by a person in the configuration.
 - **Tests cannot prove changes to themselves**, so helpers inside test code are never "proved".
@@ -163,7 +165,7 @@ otherwise have removed needed code; each has a regression test in `tests/`.
 ## GitHub Action
 
 ```yaml
-- uses: actions/checkout@v4
+- uses: actions/checkout@v5
   with: { fetch-depth: 0 }        # history is needed for attribution
 - uses: BPSKartik/justify@main
   with: { test-command: python -m pytest -q }

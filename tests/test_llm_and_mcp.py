@@ -192,3 +192,18 @@ def test_github_models_is_gone_and_claude_binary_is_found(monkeypatch, tmp_path)
     monkeypatch.setenv("JUSTIFY_LLM_PROVIDER", "github")
     with pytest.raises(ValueError, match="retired"):
         from_environment()
+
+
+def test_mcp_judge_needs_the_owner_to_allow_it(make_repo, monkeypatch):
+    from justify import mcp_server
+
+    calls = []
+    monkeypatch.setattr("justify.llm.from_environment", lambda: calls.append(1))
+    root = make_repo({"app.py": "import io\nx = 1\n"})
+    monkeypatch.delenv("JUSTIFY_ALLOW_JUDGE", raising=False)
+    monkeypatch.delenv("JUSTIFY_ALLOWED_ROOTS", raising=False)
+    out = mcp_server.scan_repository(str(root), judge=True)
+    assert calls == [] and "JUSTIFY_ALLOW_JUDGE" in out["judge_note"]
+    monkeypatch.setenv("JUSTIFY_ALLOW_JUDGE", "1")
+    mcp_server.scan_repository(str(root), judge=True)
+    assert calls == [1]

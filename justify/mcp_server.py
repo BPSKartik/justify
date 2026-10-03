@@ -79,17 +79,29 @@ def _brief(res, full: bool = True) -> dict:
              annotations=_ann(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False))
 def scan_repository(path: str, judge: bool = False) -> dict:
     """List code that cannot justify its existence, with a verdict, a reason and who wrote it
-    (AI-assisted or human commit). Read-only. Set judge=True to also run the model stages,
-    using the model configured in the server's environment."""
-    model = None
-    if judge:
-        from .llm import from_environment
-        model = from_environment()
+    (AI-assisted or human commit). Read-only. judge=True also runs the model stages, but only if
+    the person who configured this server allowed it (JUSTIFY_ALLOW_JUDGE=1) — they spend that
+    person's model credits. Leave it false unless the user asked for the model's opinion."""
     try:
         target = _allowed(path)
     except ValueError as exc:
         return {"refused": str(exc)}
-    return _brief(run(target, model=model))
+    model, note = None, None
+    if judge:
+        if os.environ.get("JUSTIFY_ALLOW_JUDGE", "").strip() == "1":
+            from .llm import from_environment
+            try:
+                model = from_environment()
+            except ValueError as exc:
+                note = str(exc)
+        else:
+            # an assistant asking for a model call must not be able to spend someone's credits
+            note = ("Model stages were not run: this server's owner has not set JUSTIFY_ALLOW_JUDGE=1. "
+                    "The static verdicts below are complete; undecided units stay (doubt means keep).")
+    out = _brief(run(target, model=model))
+    if note:
+        out["judge_note"] = note
+    return out
 
 
 @server.tool(title="Prove the removals are safe",
