@@ -1,0 +1,9 @@
+{
+  "servers": {
+    "justify": {
+      "type": "stdio",
+      "command": "justify-mcp",
+      "env": { "JUSTIFY_TEST_COMMAND": "python -m pytest -q" }
+    }
+  }
+}

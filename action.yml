@@ -1,0 +1,38 @@
+name: Justify
+description: Every line of AI-written code must justify its existence — find dead weight, attribute it, prove removals.
+branding:
+  icon: check-circle
+  color: blue
+
+inputs:
+  path:
+    description: Folder to scan, relative to the repository root.
+    default: "."
+  test-command:
+    description: Command that runs your tests. When set, every proposed removal is proved in a temporary copy.
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+    - name: Install Justify
+      shell: bash
+      run: pip install --quiet "${{ github.action_path }}"
+    - name: Scan, prove, report
+      shell: bash
+      # inputs arrive as environment variables, never pasted into the script,
+      # so a test command cannot inject shell into the step itself
+      env:
+        SCAN_PATH: ${{ inputs.path }}
+        TEST_CMD: ${{ inputs.test-command }}
+      run: |
+        set -o pipefail
+        if [ -n "$TEST_CMD" ]; then
+          justify scan "$SCAN_PATH" --no-record --report justify-report.md --prove "$TEST_CMD" || true
+        else
+          justify scan "$SCAN_PATH" --no-record --report justify-report.md
+        fi
+        cat justify-report.md >> "$GITHUB_STEP_SUMMARY"
