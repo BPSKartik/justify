@@ -586,6 +586,15 @@ body.plain { min-height: 100vh; background: radial-gradient(900px 500px at 80% -
 .token-once p { margin: 0 0 8px; font-size: 14px; }
 .token-once .code { margin: 0; }
 .dash .endpoint { margin-bottom: 8px; }
+.danger { border-color: var(--coral); }
+.danger-row { display: flex; justify-content: space-between; align-items: center; gap: 18px; flex-wrap: wrap; }
+.danger-row p { margin: 0; color: var(--muted); max-width: 70ch; }
+.btn-danger { border: 1px solid var(--coral); background: var(--coral-bg); color: var(--coral); border-radius: 10px; padding: 10px 16px; font-weight: 600; cursor: pointer; }
+.btn-danger:hover { background: var(--coral); color: #fff; }
+.consent.doc { width: min(720px, 100% - 32px); }
+.consent.doc h2 { font: 700 18px var(--cond); margin: 22px 0 6px; }
+.consent.doc p, .consent.doc li { color: var(--muted); }
+.consent.doc ul { padding-left: 20px; display: grid; gap: 6px; }
 
 @media (max-width: 1060px) {
   .top nav { display: none; }

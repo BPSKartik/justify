@@ -282,6 +282,22 @@ class Accounts:
                  "error": r["error"], "private": r["visibility"] == "private",
                  "summary": json.loads(r["summary"]) if r["summary"] else None} for r in rows]
 
+    def delete_account(self, user_id: str) -> list[str]:
+        """Erase a person: profile, sign-in identities, sessions, tokens, history. Returns the ids of
+        their private scans, whose results the caller deletes too. Public audits of public
+        repositories stay — they belong to the repository, not the person — but lose their owner."""
+        with self.db.transaction() as tx:
+            private = [r["id"] for r in tx.execute("SELECT id FROM scans WHERE owner=? AND visibility='private'",
+                                                   (user_id,)).fetchall()]
+            tx.execute("DELETE FROM scans WHERE owner=? AND visibility='private'", (user_id,))
+            tx.execute("UPDATE scans SET owner=NULL WHERE owner=?", (user_id,))
+            for table in ("user_scans", "sessions", "tokens", "oauth_codes"):
+                tx.execute(f"DELETE FROM {table} WHERE user_id=?", (user_id,))
+            tx.execute("DELETE FROM identities WHERE user_id=?", (user_id,))
+            tx.execute("DELETE FROM usage WHERE who=?", (f"u:{user_id}",))
+            tx.execute("DELETE FROM users WHERE id=?", (user_id,))
+        return private
+
     def history_count(self, user_id: str) -> int:
         return self.db.one("SELECT COUNT(*) AS n FROM user_scans WHERE user_id=?", (user_id,))["n"]
 

@@ -272,6 +272,12 @@
     $("cmp-close").addEventListener("click", () => { $("compare").hidden = true; });
     $("history-more").addEventListener("click", () => loadHistory(true));
     $("token-form").addEventListener("submit", makeToken);
+    $("delete-account").addEventListener("click", async () => {
+      const typed = window.prompt("This erases your profile, history, tokens and private audits for good. Type DELETE to confirm.");
+      if (typed !== "DELETE") return;
+      const { status } = await api("/api/me", { method: "DELETE" });
+      if (status === 200) location.replace("/"); else toast("Could not delete the account. Reload and try again.");
+    });
     $("mcp-url").textContent = cfg.mcp_url || `${location.origin}/mcp`;
     $("mcp-copy").addEventListener("click", () => copy($("mcp-url").textContent, "MCP URL"));
     const { body: stats } = await api("/api/me/stats");

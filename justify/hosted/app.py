@@ -359,6 +359,20 @@ def create_app(jobs: Jobs | None = None) -> Starlette:
         return JSONResponse({"user": user, "csrf": csrf, "usage": usage, "audits": count, "via": how},
                             headers={"Cache-Control": "no-store"})
 
+    async def delete_me(request: Request) -> Response:
+        user, _, how, bad = await who(request, mutate=True)
+        if bad or (bad := need_user(user)):
+            return bad
+        if how != "session":
+            return err("Delete your account from the dashboard.", 403, "session_only")
+        private = await run_in_threadpool(accounts.delete_account, user["id"])
+        for scan_id in private:
+            await run_in_threadpool(jobs.results.delete, scan_id)
+        print(json.dumps({"event": "account_deleted", "private_scans": len(private)}), flush=True)
+        resp = JSONResponse({"ok": True, "deleted_private_audits": len(private)})
+        resp.delete_cookie(SESSION_COOKIE, path="/")
+        return resp
+
     async def my_scans(request: Request) -> Response:
         user, _, _, _ = await who(request)
         if (bad := need_user(user)):
@@ -536,6 +550,7 @@ def create_app(jobs: Jobs | None = None) -> Starlette:
     routes = [
         Route("/", page("index.html")), Route("/s/{scan_id}", page("index.html")),
         Route("/dashboard", page("dashboard.html")), Route("/signin", page("signin.html")),
+        Route("/privacy", page("privacy.html")),
         Route("/health", health),
         Route("/api/config", config),
         Route("/api/scans", create_scan, methods=["POST"]),
@@ -543,7 +558,7 @@ def create_app(jobs: Jobs | None = None) -> Starlette:
         Route("/api/scans/{scan_id}", get_scan),
         Route("/api/scans/{scan_id}/report.md", report_md),
         Route("/api/recent", recent),
-        Route("/api/me", me),
+        Route("/api/me", me), Route("/api/me", delete_me, methods=["DELETE"]),
         Route("/api/me/scans", my_scans),
         Route("/api/me/scans/{scan_id}", forget_scan, methods=["DELETE"]),
         Route("/api/me/stats", my_stats),

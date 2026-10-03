@@ -288,3 +288,23 @@ def test_oauth_for_mcp_end_to_end(app_client):
     h = {"x-justify-csrf": c.get("/api/me").json()["csrf"]}
     assert c.delete(f"/api/me/apps/{client_id}", headers=h).json()["ok"]
     assert _rpc(c, "tools/list", {}, new["access_token"]).status_code == 401
+
+
+def test_deleting_an_account_erases_it(app_client):
+    c = app_client
+    csrf, _ = _sign_in(c, "dora")
+    h = {"x-justify-csrf": csrf}
+    up = c.post("/api/uploads", json={"name": "mine", "files": [{"path": "a.py", "content": "import os\n"}]}, headers=h)
+    up_id = up.json()["id"]
+    assert _wait(c, up_id)["status"] == "done"
+    made = c.post("/api/me/tokens", json={"name": "x"}, headers=h).json()
+    assert c.delete("/api/me").status_code == 403                               # no CSRF header
+    r = c.delete("/api/me", headers=h)
+    assert r.status_code == 200 and r.json()["deleted_private_audits"] == 1
+    assert c.get("/api/me").status_code == 401
+    assert c.get("/api/me", headers={"authorization": f"Bearer {made['token']}"}).status_code == 401
+    db = c.app.state.jobs.database
+    assert db.one("SELECT COUNT(*) AS n FROM users")["n"] == 0
+    assert db.one("SELECT COUNT(*) AS n FROM scans WHERE id=?", (up_id,))["n"] == 0
+    assert c.app.state.jobs.results.get(up_id) is None
+    assert c.get("/privacy").status_code == 200
