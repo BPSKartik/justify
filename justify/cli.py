@@ -25,6 +25,10 @@ def _print_summary(res) -> None:
         j = res.judging
         print(f"  Stage 4-5  {j['model']}: judged {j['judged']}, {j['calls']} calls, "
               f"vetoed {j['vetoed_static_removals']} static removal(s)" + (f", errors: {j['errors'][0]}" if j["errors"] else ""))
+        board = j.get("scoreboard")
+        if board:
+            print("  Scoreboard  the tests graded each juror: " + "   ".join(
+                f"{name} {row['right']}/{row['right'] + row['wrong']}" for name, row in board.items()))
     else:
         print("  Stage 4-5  no model (pass --judge to use one) — undecided units stay")
     if res.proof:
@@ -41,6 +45,12 @@ def _print_summary(res) -> None:
         if f.final in (REMOVE, SIMPLIFY) or f.judgement:
             loc = f"{f.file}:{f.line}"
             print(f"  {f.final:<8} {f.kind:<10} {loc:<34} {f.name:<22} {f.reason[:70]}")
+            jury = (f.judgement or {}).get("jury")
+            if jury:
+                marks = "  ".join(f"{v['model']} {'—' if 'error' in v else ('remove' if v['verdict'] == 'remove' else 'keep')}"
+                                  for v in jury)
+                print(f"  {'':<8} jury       {marks}")
+                print(f"  {'':<8}            {f.judgement.get('decision', '')[:100]}")
         elif f.verdict == REMOVE and res.proof:      # kept because the proof did not pass: say why
             loc = f"{f.file}:{f.line}"
             print(f"  {'KEEP':<8} {f.kind:<10} {loc:<34} {f.name:<22} proof: {f.proof[:64]}")

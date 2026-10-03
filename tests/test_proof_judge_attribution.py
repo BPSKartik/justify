@@ -90,13 +90,17 @@ def test_removal_needs_confidence(make_repo):
 
 
 def test_invented_evidence_is_rejected(make_repo):
-    root = make_repo({"app.py": "import io\nx = 1\n"})
-    m = Scripted({"verdict": "keep", "reason": "used", "evidence": ["app.py:2", "ghost.py:9", "app.py:1"],
-                  "confidence": 0.9}, {})
+    root = make_repo({"app.py": "import io\nratio = 1\n",
+                      "other.py": "import io\nio.StringIO\n"})
+    m = Scripted({"verdict": "keep", "reason": "used",
+                  "evidence": ["app.py:2", "ghost.py:9", "app.py:1", "other.py:2"], "confidence": 0.9}, {})
     res = run(root, model=m, record=False)
-    j = next(f for f in res.findings if f.name == "io").judgement
-    assert "app.py:1" in j["evidence_checked"]
-    assert "ghost.py:9" in j["evidence_rejected"] and "app.py:2" in j["evidence_rejected"]
+    j = next(f for f in res.findings if f.name == "io" and f.file == "app.py").judgement
+    rejected = j["evidence_rejected"]
+    assert "ghost.py:9" in rejected                      # invented file
+    assert "app.py:1" in rejected                        # the import's own line proves nothing
+    assert "app.py:2" in rejected                        # "ratio" contains "io" but is not io
+    assert "other.py:2" in rejected                      # another file's io is another import
 
 
 def test_no_model_means_ambiguous_stays(make_repo):
@@ -217,3 +221,84 @@ def test_cli_progress_version_and_friendly_errors(make_repo, capsys):
     except SystemExit:
         pass
     assert "justify 1.0.0" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------- the jury
+
+def _jury(*answers, challenge=None):
+    from justify.llm import Jury
+
+    class Fixed(Model):
+        def __init__(self, name, answer):
+            self.name, self.answer, self.calls = name, answer, 0
+
+        def ask(self, system, user):
+            self.calls += 1
+            if "stage 5" in system:
+                return challenge or {"refuted": False}
+            if isinstance(self.answer, Exception):
+                raise self.answer
+            return self.answer
+
+    members = [Fixed(f"m{i}", a) for i, a in enumerate(answers)]
+    return Jury(members, members[0]), members
+
+
+REMOVE_VOTE = {"verdict": "remove", "reason": "unused", "evidence": [], "confidence": 0.9}
+KEEP_VOTE = {"verdict": "keep", "reason": "unsure", "evidence": [], "confidence": 0.6}
+
+
+def test_jury_removes_only_with_near_agreement(make_repo):
+    root = make_repo({"app.py": "import io\nx = 1\n"})
+    jury, _ = _jury(REMOVE_VOTE, REMOVE_VOTE, REMOVE_VOTE, KEEP_VOTE)          # 3 of 4: enough
+    f = next(f for f in run(root, model=jury, record=False).findings if f.name == "io")
+    assert f.final == "REMOVE" and f.judgement["remove_votes"] == 3 and f.judgement["need"] == 3
+    jury, _ = _jury(REMOVE_VOTE, REMOVE_VOTE, KEEP_VOTE, KEEP_VOTE)            # 2 of 4: a split
+    f = next(f for f in run(root, model=jury, record=False).findings if f.name == "io")
+    assert f.final == "KEEP" and f.judgement["split"]
+
+
+def test_one_juror_with_real_evidence_keeps_the_code(make_repo):
+    # io is reached through globals(): the graph cannot see it, one juror can, and cites the line
+    root = make_repo({"app.py": "import io\nbuf = globals()['io']\n"})
+    evidence_keep = {"verdict": "keep", "reason": "used", "evidence": ["app.py:2"], "confidence": 0.8}
+    jury, _ = _jury(REMOVE_VOTE, REMOVE_VOTE, REMOVE_VOTE, evidence_keep)
+    f = next(f for f in run(root, model=jury, record=False).findings if f.name == "io")
+    assert f.final == "KEEP" and "cited evidence" in f.judgement["decision"]
+
+
+def test_challenger_and_failed_jurors(make_repo):
+    from justify.llm import ModelError
+    root = make_repo({"app.py": "import io\nx = 1\n"})
+    jury, _ = _jury(REMOVE_VOTE, REMOVE_VOTE, REMOVE_VOTE, challenge={"refuted": True, "reason": "plugin"})
+    f = next(f for f in run(root, model=jury, record=False).findings if f.name == "io")
+    assert f.final == "KEEP" and f.judgement["challenge"]["refuted"]
+    jury, _ = _jury(REMOVE_VOTE, ModelError("down"), ModelError("down"))       # one answer: cannot sit
+    f = next(f for f in run(root, model=jury, record=False).findings if f.name == "io")
+    assert f.final == "KEEP" and "could not sit" in f.judgement["decision"]
+
+
+def test_the_tests_grade_the_jury(make_repo):
+    root = make_repo({"app.py": "import io\nx = 1\n", "check.py": "import app\n"})
+    jury, _ = _jury(REMOVE_VOTE, REMOVE_VOTE, KEEP_VOTE)
+    res = run(root, model=jury, record=False, prove_command=f"{sys.executable} check.py")
+    board = res.judging["scoreboard"]
+    assert board["m0"] == {"right": 1, "wrong": 0} and board["m2"] == {"right": 0, "wrong": 1}
+
+
+def test_a_jury_keep_is_graded_but_still_stands(make_repo):
+    root = make_repo({"app.py": "import io\nx = 1\n", "check.py": "import app\n"})
+    jury, _ = _jury(REMOVE_VOTE, KEEP_VOTE, KEEP_VOTE)                         # the jury keeps io
+    res = run(root, model=jury, record=False, prove_command=f"{sys.executable} check.py")
+    io = next(f for f in res.findings if f.name == "io")
+    assert io.final == "KEEP" and io.proof == "passed"                       # proved removable, still kept
+    assert res.judging["scoreboard"]["m1"] == {"right": 0, "wrong": 1}        # and the keep voters lose a point
+    assert res.proof["proved_for_grading_only"] == 1
+
+
+def test_a_word_inside_a_string_is_not_evidence(make_repo):
+    # the trap a text search falls for: "date" in a string is not a use of the date import
+    root = make_repo({"app.py": "from datetime import date\ndef day(args):\n    return args.get('date')  # date\nday({})\n"})
+    m = Scripted({"verdict": "keep", "reason": "used", "evidence": ["app.py:3"], "confidence": 0.9}, {})
+    j = next(f for f in run(root, model=m, record=False).findings if f.name == "date").judgement
+    assert "app.py:3" in j["evidence_rejected"] and not j["evidence_checked"]

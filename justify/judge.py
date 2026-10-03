@@ -19,7 +19,12 @@ The model is never trusted on its word:
 from __future__ import annotations
 
 from .facts import RepoFacts
-from .llm import Model, ModelError
+import io
+import re
+import tokenize
+from concurrent.futures import ThreadPoolExecutor
+
+from .llm import Jury, Model, ModelError
 from .model import AMBIGUOUS, KEEP, REMOVE, SIMPLIFY, Finding
 
 JUSTIFY_SYSTEM = (
@@ -40,6 +45,71 @@ CHALLENGE_SYSTEM = (
 )
 
 CONFIDENCE_TO_REMOVE = 0.7
+
+
+def _vote(model: Model, rf: RepoFacts, f: Finding, ctx: str) -> dict:
+    """One juror's stage-4 answer, with its evidence checked against the repository."""
+    try:
+        j = model.ask(JUSTIFY_SYSTEM, ctx)
+    except ModelError as exc:
+        return {"model": model.name, "error": str(exc)[:200]}
+    verdict = str(j.get("verdict", "")).strip().lower()
+    if verdict not in ("keep", "remove"):
+        # an answer outside the format is no vote at all — not a quiet "keep"
+        return {"model": model.name, "error": f"answered off-format: {str(j)[:120]}"}
+    ok, bad = _check_evidence(rf, f, j.get("evidence"))
+    try:
+        conf = float(j.get("confidence", 0))
+    except (TypeError, ValueError):
+        conf = 0.0
+    return {"model": model.name, "verdict": verdict, "confidence": conf,
+            "reason": j.get("reason"), "evidence_checked": ok, "evidence_rejected": bad,
+            "seconds": getattr(model, "seconds", None)}
+
+
+def _jury(rf: RepoFacts, f: Finding, jury: Jury, ctx: str) -> tuple[str, dict, int]:
+    """The jury's rule, written for code that is about to be deleted:
+      * every juror answers on its own, in parallel;
+      * one juror that says keep AND cites evidence that checks out keeps the code;
+      * a removal needs every juror but one to say remove with confidence (at least two);
+      * then the strongest model, as challenger, tries to prove the code is needed;
+      * anything else — a split, too few answers — keeps the code and is flagged for a person.
+    Returns (final verdict, record, number of model calls)."""
+    with ThreadPoolExecutor(max_workers=len(jury.members)) as pool:
+        votes = list(pool.map(lambda m: _vote(m, rf, f, ctx), jury.members))
+    calls = len(jury.members)
+    answered = [v for v in votes if "error" not in v]
+    removes = [v for v in answered if v["verdict"] == "remove" and v["confidence"] >= CONFIDENCE_TO_REMOVE]
+    vetoes = [v for v in answered if v["verdict"] != "remove" and v["evidence_checked"]]
+    need = max(2, len(answered) - 1)
+    record = {"model": jury.name, "jury": votes, "need": need, "remove_votes": len(removes),
+              "justify": {"verdict": "remove" if len(removes) >= need else "keep",
+                          "reason": f"{len(removes)} of {len(answered)} jurors said remove"}}
+    if f.kind == "dependency":
+        record["decision"] = "dependencies are reported, never removed"
+        return KEEP, record, calls
+    if len(answered) < 2:
+        record["decision"] = "the jury could not sit: fewer than two jurors answered"
+        return KEEP, record, calls
+    if vetoes:
+        record["decision"] = f"kept: {vetoes[0]['model']} cited evidence of use ({vetoes[0]['evidence_checked'][0]})"
+        return KEEP, record, calls
+    if len(removes) < need:
+        record["decision"] = f"kept: the jury split {len(removes)}–{len(answered) - len(removes)}; a person should look"
+        record["split"] = bool(removes)
+        return KEEP, record, calls
+    try:
+        c = jury.challenger.ask(CHALLENGE_SYSTEM, ctx)
+        calls += 1
+    except ModelError as exc:
+        c = {"refuted": True, "reason": f"challenge could not run ({exc}) — keeping"}
+    cok, cbad = _check_evidence(rf, f, c.get("evidence"))
+    refuted = bool(c.get("refuted"))
+    record["challenge"] = {"model": jury.challenger.name, "refuted": refuted, "reason": c.get("reason"),
+                           "evidence_checked": cok, "evidence_rejected": cbad}
+    record["decision"] = "kept: the challenger found a use" if refuted else \
+        f"remove: {len(removes)} of {len(answered)} jurors agreed and the challenge failed"
+    return (KEEP if refuted else REMOVE), record, calls
 
 
 def _context(rf: RepoFacts, f: Finding, max_lines: int = 40) -> str:
@@ -67,10 +137,27 @@ def _context(rf: RepoFacts, f: Finding, max_lines: int = 40) -> str:
             f"CODE:\n{code}")
 
 
+def _code_names(line: str) -> set[str]:
+    """Identifiers a line of Python actually uses — not words inside its strings or comments.
+    request.args.get("date") does not use the date import, and a model that says it does has
+    fallen for the same trap a text search falls for."""
+    try:
+        return {t.string for t in tokenize.generate_tokens(io.StringIO(line + "\n").readline)
+                if t.type == tokenize.NAME}
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        stripped = re.sub(r"(\"\"\"|\'\'\'|\"|\').*?\1", "", line.split("#", 1)[0])
+        return set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", stripped))
+
+
 def _check_evidence(rf: RepoFacts, f: Finding, evidence) -> tuple[list[str], list[str]]:
+    """Evidence is a file:line that names the unit — as a whole word, outside the unit's own
+    lines (the line `import io` sits on is not evidence that io is used), and, for an import,
+    in the same file (an import is only ever used by the file that makes it). A model citing
+    anything else has invented it."""
     ok, rejected = [], []
     texts = {rel: ff.src.source_lines for rel, ff in rf.files.items()}
     texts.update({rel: t.split("\n") for rel, t in rf.other})
+    word = re.compile(rf"(?<![A-Za-z0-9_]){re.escape(f.name)}(?![A-Za-z0-9_])")
     for item in (evidence or [])[:10]:
         item = str(item).strip()
         rel, _, num = item.rpartition(":")
@@ -80,7 +167,21 @@ def _check_evidence(rf: RepoFacts, f: Finding, evidence) -> tuple[list[str], lis
             rejected.append(item)
             continue
         src = texts.get(rel)
-        if src and 1 <= n <= len(src) and f.name in src[n - 1]:
+        own = rel == f.file and f.line <= n <= f.end_line
+        elsewhere = f.kind == "import" and rel != f.file
+        if not src or not 1 <= n <= len(src) or own or elsewhere:
+            rejected.append(item)
+            continue
+        line = src[n - 1]
+        ff = rf.files.get(rel)
+        # strings count only where names really are reached through strings: a unit the graph
+        # left undecided, or a file that uses getattr / globals() / importlib
+        by_string = f.verdict == AMBIGUOUS or bool(ff and (ff.dynamic or ff.dynamic_globals))
+        if rel.endswith(".py") and not by_string:
+            named = f.name in _code_names(line)
+        else:
+            named = bool(word.search(line))
+        if named:
             ok.append(item)
         else:
             rejected.append(item)
@@ -115,6 +216,16 @@ def judge(rf: RepoFacts, findings: list[Finding], model: Model | None, limit: in
         if progress:
             progress(f"judging {judged}/{min(to_judge, limit)}: {f.file}:{f.line} {f.name}")
         ctx = _context(rf, f)
+        if isinstance(model, Jury):
+            final, record, n = _jury(rf, f, model, ctx)
+            calls += n
+            failed_in_a_row = failed_in_a_row + 1 if all("error" in v for v in record["jury"]) else 0
+            if failed_in_a_row:
+                errors.append(record["jury"][0].get("error", "every juror failed"))
+            f.final, f.judgement = final, record
+            if final == KEEP and f.verdict == REMOVE:
+                vetoed += 1
+            continue
         try:
             j = model.ask(JUSTIFY_SYSTEM, ctx)
             calls += 1
