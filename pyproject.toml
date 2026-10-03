@@ -23,7 +23,7 @@ Repository = "https://github.com/BPSKartik/justify"
 
 [project.optional-dependencies]
 mcp = ["mcp>=2,<3"]
-hosted = ["mcp>=2,<3", "uvicorn>=0.30", "starlette>=0.37"]
+hosted = ["mcp>=2,<3", "uvicorn>=0.30", "starlette>=0.37", "cryptography>=42"]
 dev = ["pytest>=8", "httpx"]
 
 [project.scripts]

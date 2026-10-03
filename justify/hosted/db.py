@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS scans (
     id TEXT PRIMARY KEY, kind TEXT NOT NULL DEFAULT 'github', repo TEXT NOT NULL, url TEXT, ref TEXT, sha TEXT,
     version TEXT, status TEXT NOT NULL, stage TEXT, created REAL, started REAL, finished REAL,
     error TEXT, error_code TEXT, summary TEXT, client TEXT, owner TEXT,
-    visibility TEXT NOT NULL DEFAULT 'public', src TEXT
+    visibility TEXT NOT NULL DEFAULT 'public', src TEXT, sealed INTEGER NOT NULL DEFAULT 0, inst INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_cache ON scans(repo, sha, version, status);
 CREATE INDEX IF NOT EXISTS idx_status ON scans(status, created);
@@ -56,6 +56,10 @@ CREATE TABLE IF NOT EXISTS user_scans (
     user_id TEXT NOT NULL, scan_id TEXT NOT NULL, created REAL, via TEXT, PRIMARY KEY (user_id, scan_id)
 );
 CREATE INDEX IF NOT EXISTS idx_user_scans ON user_scans(user_id, created);
+CREATE TABLE IF NOT EXISTS github_installations (
+    user_id TEXT NOT NULL, installation_id INTEGER NOT NULL, account TEXT, created REAL,
+    PRIMARY KEY (user_id, installation_id)
+);
 """
 
 
@@ -67,6 +71,12 @@ class Database:
         with self.use() as db:
             db.execute("PRAGMA journal_mode=WAL")
             db.executescript(SCHEMA)
+            # columns added after a database was first made (restored snapshots are older than the code)
+            have = {r["name"] for r in db.execute("PRAGMA table_info(scans)")}
+            if "sealed" not in have:
+                db.execute("ALTER TABLE scans ADD COLUMN sealed INTEGER NOT NULL DEFAULT 0")
+            if "inst" not in have:
+                db.execute("ALTER TABLE scans ADD COLUMN inst INTEGER")
 
     def connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.path, timeout=30, isolation_level=None)

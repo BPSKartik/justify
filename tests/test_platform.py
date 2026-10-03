@@ -19,6 +19,7 @@ from starlette.testclient import TestClient  # noqa: E402
 
 from justify.hosted.fetch import FetchError  # noqa: E402
 from justify.hosted.jobs import Jobs  # noqa: E402
+from justify.hosted.seal import key_text, new_key, unseal  # noqa: E402
 from justify.hosted.uploads import unpack_files, unpack_zip  # noqa: E402
 
 GIT_ENV = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
@@ -108,17 +109,33 @@ def test_allowances_privacy_history_and_tokens(app_client):
     assert r.status_code == 202
     assert _wait(c, r.json()["id"])["status"] == "done"
 
-    # her own code: private to her, with history if the zip carries .git
-    up = c.post("/api/uploads?name=my-project.zip", headers={**h, "content-type": "application/zip"},
-                content=_zip({"my-project/lib/a.py": "import os\n\ndef used():\n    return 1\n\nused()\n",
-                              "my-project/lib/b.ts": "export const x = 1;\n"}))
+    # her own code: private to her, sealed with a key only her browser holds
+    zipped = _zip({"my-project/lib/a.py": "import os\n\ndef used():\n    return 1\n\nused()\n",
+                   "my-project/lib/b.ts": "export const x = 1;\n"})
+    nokey = c.post("/api/uploads?name=my-project.zip", headers={**h, "content-type": "application/zip"}, content=zipped)
+    assert nokey.status_code == 400 and nokey.json()["code"] == "no_key"
+    key = new_key()
+    up = c.post("/api/uploads?name=my-project.zip", content=zipped,
+                headers={**h, "content-type": "application/zip", "x-justify-result-key": key_text(key)})
     assert up.status_code == 202, up.text
     up_id = up.json()["id"]
     done = _wait(c, up_id)
-    assert done["status"] == "done" and done["private"] and done["repo"] == "upload/my-project"
-    assert {l["name"] for l in done["result"]["languages"]} == {"Python", "TypeScript"}
-    assert any(f["name"] == "os" for f in done["result"]["findings"])
+    assert done["status"] == "done" and done["private"] and done["sealed"] and done["repo"] == "upload/my-project"
+    assert done["result"] is None                                  # the server cannot read it back
+    sealed = c.get(f"/api/scans/{up_id}/sealed")
+    assert sealed.status_code == 200 and sealed.content.startswith(b"JSEAL1")
+    assert b"my-project" not in sealed.content and b"lib/a.py" not in sealed.content
+    result = unseal(key, up_id, sealed.content)                     # what her browser does
+    assert {l["name"] for l in result["languages"]} == {"Python", "TypeScript"}
+    assert any(f["name"] == "os" for f in result["findings"])
+    with pytest.raises(Exception):
+        unseal(new_key(), up_id, sealed.content)
+    on_disk = b"".join(p.read_bytes() for p in (c.app.state.jobs.results.dir and
+                                                 __import__("pathlib").Path(c.app.state.jobs.results.dir)).iterdir())
+    assert b"lib/a.py" not in on_disk and b"used" not in on_disk
+    assert c.get(f"/api/scans/{up_id}/report.md").status_code == 409
     stranger = TestClient(c.app, base_url="http://localhost")
+    assert stranger.get(f"/api/scans/{up_id}/sealed").status_code == 404
     assert stranger.get(f"/api/scans/{up_id}").status_code == 404
     assert stranger.get(f"/api/scans/{up_id}/report.md").status_code == 404
     assert up_id not in json.dumps(c.get("/api/recent").json())
@@ -294,7 +311,8 @@ def test_deleting_an_account_erases_it(app_client):
     c = app_client
     csrf, _ = _sign_in(c, "dora")
     h = {"x-justify-csrf": csrf}
-    up = c.post("/api/uploads", json={"name": "mine", "files": [{"path": "a.py", "content": "import os\n"}]}, headers=h)
+    up = c.post("/api/uploads", json={"name": "mine", "files": [{"path": "a.py", "content": "import os\n"}]},
+                headers={**h, "x-justify-result-key": key_text(new_key())})
     up_id = up.json()["id"]
     assert _wait(c, up_id)["status"] == "done"
     made = c.post("/api/me/tokens", json={"name": "x"}, headers=h).json()
@@ -308,3 +326,113 @@ def test_deleting_an_account_erases_it(app_client):
     assert db.one("SELECT COUNT(*) AS n FROM scans WHERE id=?", (up_id,))["n"] == 0
     assert c.app.state.jobs.results.get(up_id) is None
     assert c.get("/privacy").status_code == 200
+
+
+def test_the_service_keeps_no_addresses_no_emails_and_no_readable_private_results(app_client):
+    c = app_client
+    c.post("/api/scans", json={"repo": "owner/anon"})
+    db = c.app.state.jobs.database
+    who = [r["who"] for r in db.all("SELECT who FROM usage")]
+    assert who and all(w.startswith(("ip:", "u:")) and "." not in w and w.count(":") == 1 for w in who)
+    assert all(r["client"] in ("web", "api", "mcp") for r in db.all("SELECT client FROM scans"))
+    accounts = c.app.state.accounts
+    u = accounts.sign_in("microsoft", "t:o", {"login": "someone@contoso.com", "name": "Some One",
+                                               "email": "someone@contoso.com"})
+    row = db.one("SELECT * FROM users WHERE id=?", (u["id"],))
+    assert row["email"] is None and row["login"] is None and row["name"] == "Some One"
+    g = accounts.sign_in("github", "42", {"login": "octo", "name": "Octo", "email": "octo@example.com"})
+    assert db.one("SELECT email, login FROM users WHERE id=?", (g["id"],))["login"] == "octo"
+    assert db.one("SELECT email FROM users WHERE id=?", (g["id"],))["email"] is None
+
+
+def test_code_shared_in_a_chat_is_sealed_with_a_key_the_ai_app_holds(app_client):
+    c = app_client
+    csrf, _ = _sign_in(c, "erin")
+    pat = c.post("/api/me/tokens", json={"name": "chat"}, headers={"x-justify-csrf": csrf}).json()["token"]
+    _rpc(c, "initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
+                           "clientInfo": {"name": "t", "version": "1"}}, pat)
+    files = [{"path": "app.py", "content": "import os\nimport json\nprint(json.dumps({}))\n"}]
+    out = json.loads(_rpc(c, "tools/call", {"name": "audit_code", "arguments": {"files": files, "name": "chat-code"}},
+                          pat, 2).json()["result"]["content"][0]["text"])
+    assert out["status"] == "done" and any(f["name"] == "os" for f in out["findings"]) and out["result_key"]
+    again = json.loads(_rpc(c, "tools/call", {"name": "get_scan_result", "arguments": {"scan_id": out["scan_id"]}},
+                            pat, 3).json()["result"]["content"][0]["text"])
+    assert again["sealed"] and "result_key" in again["error"]                 # no key, no result
+    opened = json.loads(_rpc(c, "tools/call", {"name": "get_scan_result",
+                                               "arguments": {"scan_id": out["scan_id"], "result_key": out["result_key"]}},
+                             pat, 4).json()["result"]["content"][0]["text"])
+    assert opened["findings"] == out["findings"]
+
+
+# ---------------------------------------------------------------- private repositories through the GitHub App
+
+class _FakeApp:
+    """Stands in for GitHub: installation 99 sits on GitHub account 4242 and holds one private repository."""
+
+    def install_url(self, state):
+        return f"https://github.com/apps/justify-test/installations/new?state={state}"
+
+    def installation(self, installation_id):
+        return {"id": installation_id, "account": {"id": 4242, "login": "octo"}}
+
+    def token(self, installation_id):
+        return "ghs_installation_token"
+
+    def repos(self, installation_id):
+        return [{"full_name": "octo/secret", "name": "secret", "private": True, "description": "", "language": "Python",
+                 "stars": 0, "pushed_at": None, "fork": False, "archived": False, "installation_id": installation_id}]
+
+
+def test_private_repositories_need_the_app_on_your_own_account_and_are_sealed(tmp_path, origin, monkeypatch):
+    for k, v in {"JUSTIFY_DEV_LOGIN": "1", "JUSTIFY_PUBLIC_URL": "http://localhost", "JUSTIFY_RATE_PER_HOUR": "500"}.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.delenv("JUSTIFY_PUBLIC_HOSTS", raising=False)
+    from justify.hosted.app import create_app
+    jobs = Jobs(str(tmp_path / "data"), workers=1)
+    seen = {}
+
+    def fake_clone(rr, branch, dest, timeout, max_mb, token=None):
+        seen["token"] = token
+        subprocess.run(["git", "clone", "-q", str(origin), dest], check=True)
+
+    jobs.clone_fn = fake_clone
+    jobs.resolve_fn = lambda rr, token=None: ("c" * 40, "main")
+    app = create_app(jobs, ghapp=_FakeApp())
+    with TestClient(app, base_url="http://localhost", follow_redirects=False) as c:
+        mallory = TestClient(app, base_url="http://localhost", follow_redirects=False)
+        accounts = app.state.accounts
+        octo = accounts.sign_in("github", "4242", {"login": "octo", "name": "Octo"})
+        c.cookies.set("jfy_session", accounts.new_session(octo["id"])[0])
+        csrf = c.get("/api/me").json()["csrf"]
+        assert c.get("/api/config").json()["github_app"] is True
+
+        # someone else cannot claim octo's installation by typing its id
+        eve = accounts.sign_in("github", "777", {"login": "eve", "name": "Eve"})
+        mallory.cookies.set("jfy_session", accounts.new_session(eve["id"])[0])
+        start = mallory.get("/github/connect")
+        state = re.search(r"state=([^&]+)", start.headers["location"]).group(1)
+        assert mallory.get(f"/github/installed?installation_id=99&setup_action=install&state={state}").status_code == 403
+        assert mallory.get("/api/me/private-repos").json()["repos"] == []
+
+        start = c.get("/github/connect")
+        assert start.status_code == 302 and start.headers["location"].startswith("https://github.com/apps/")
+        state = re.search(r"state=([^&]+)", start.headers["location"]).group(1)
+        assert c.get(f"/github/installed?installation_id=99&setup_action=install&state=forged").status_code == 403
+        back = c.get(f"/github/installed?installation_id=99&setup_action=install&state={state}")
+        assert back.status_code == 303 and back.headers["location"] == "/?repos=1"
+        listed = c.get("/api/me/private-repos").json()
+        assert [r["full_name"] for r in listed["repos"]] == ["octo/secret"] and listed["connected"]
+
+        h = {"x-justify-csrf": csrf}
+        assert c.post("/api/scans", json={"repo": "octo/other", "private": True},
+                      headers={**h, "x-justify-result-key": key_text(new_key())}).status_code == 403
+        key = new_key()
+        r = c.post("/api/scans", json={"repo": "octo/secret", "private": True}, headers={**h, "x-justify-result-key": key_text(key)})
+        assert r.status_code == 202, r.text
+        done = _wait(c, r.json()["id"])
+        assert done["status"] == "done" and done["sealed"] and done["result"] is None and done["kind"] == "github-private"
+        assert seen["token"] == "ghs_installation_token"
+        result = unseal(key, done["id"], c.get(f"/api/scans/{done['id']}/sealed").content)
+        assert result["github_blob_base"].startswith("https://github.com/octo/secret/blob/")
+        assert mallory.get(f"/api/scans/{done['id']}").status_code == 404
+        assert done["id"] not in json.dumps(c.get("/api/recent").json())

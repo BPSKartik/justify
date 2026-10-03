@@ -171,16 +171,58 @@ class Results:
         except (OSError, json.JSONDecodeError):
             return None
 
-    def delete(self, scan_id: str) -> None:
-        try:
-            os.remove(self._path(scan_id))
-        except OSError:
-            pass
+    def _sealed_path(self, scan_id: str) -> str:
+        return self._path(scan_id)[:-len(".json.gz")] + ".sealed"
+
+    def put_sealed(self, scan_id: str, data: bytes) -> None:
+        """A private result, already encrypted with a key the server does not keep."""
+        tmp = self._sealed_path(scan_id) + ".tmp"
+        with open(tmp, "wb") as fh:
+            fh.write(data)
+        os.replace(tmp, self._sealed_path(scan_id))
         if self.blob:
+            threading.Thread(target=self._mirror_sealed, args=(scan_id, data), daemon=True).start()
+
+    def _mirror_sealed(self, scan_id: str, data: bytes) -> None:
+        for attempt in range(3):
             try:
-                self.blob.delete(f"results/{scan_id}.json.gz")
+                self.blob.put(f"results/{scan_id}.sealed", data)
+                return
+            except BlobError as exc:
+                if attempt == 2:
+                    print(json.dumps({"event": "blob_error", "op": "sealed", "id": scan_id, "error": str(exc)}),
+                          flush=True)
+                time.sleep(2 * (attempt + 1))
+
+    def get_sealed(self, scan_id: str) -> bytes | None:
+        path = self._sealed_path(scan_id)
+        if not os.path.exists(path) and self.blob:
+            try:
+                data = self.blob.get(f"results/{scan_id}.sealed")
             except BlobError:
+                data = None
+            if data:
+                with open(path + ".tmp", "wb") as fh:
+                    fh.write(data)
+                os.replace(path + ".tmp", path)
+        try:
+            with open(path, "rb") as fh:
+                return fh.read()
+        except OSError:
+            return None
+
+    def delete(self, scan_id: str) -> None:
+        for path in (self._path(scan_id), self._sealed_path(scan_id)):
+            try:
+                os.remove(path)
+            except OSError:
                 pass
+        if self.blob:
+            for name in (f"results/{scan_id}.json.gz", f"results/{scan_id}.sealed"):
+                try:
+                    self.blob.delete(name)
+                except BlobError:
+                    pass
 
 
 class Snapshots:

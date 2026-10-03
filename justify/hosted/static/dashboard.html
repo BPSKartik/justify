@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Dashboard — Justify</title>
-<meta name="color-scheme" content="light dark">
-<meta name="theme-color" content="#12233f">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#08111f">
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Condensed:wght@600;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="/static/styles.css">
 <script src="/static/common.js" defer></script>
 <script src="/static/dashboard.js" defer></script>
@@ -26,8 +26,8 @@
 
 <header class="top">
   <div class="wrap top-row">
-    <a class="brand" href="/" aria-label="Justify, home"><svg class="mark" aria-hidden="true"><use href="#mark"/></svg><span>Justify</span></a>
-    <nav aria-label="Dashboard sections">
+    <a class="brand" href="/" aria-label="Justify, home"><svg class="mark" viewBox="0 0 64 64" aria-hidden="true"><use href="#mark"/></svg><span>Justify</span></a>
+    <nav class="nav" aria-label="Dashboard sections">
       <a href="#overview">Overview</a>
       <a href="#repos">Repositories</a>
       <a href="#history">History</a>
@@ -56,9 +56,9 @@
         <label for="quick-repo">Audit a repository</label>
         <div class="field">
           <input id="quick-repo" type="text" placeholder="owner/repository or a GitHub URL" autocomplete="off" autocapitalize="off" spellcheck="false">
-          <button type="submit" id="quick-btn">Audit</button>
+          <button type="submit" id="quick-btn" class="btn-primary">Audit</button>
         </div>
-        <p class="quick-note"><a href="/?upload=1">Or audit your own code →</a></p>
+        <p class="quick-note"><a href="/?repos=1">Pick from your repositories</a> · <a href="/?upload=1">audit your own code</a></p>
         <p class="field-error" id="quick-error" role="alert" hidden></p>
       </form>
     </div>
@@ -90,7 +90,7 @@
     </div>
 
     <div class="panel compare-panel" id="compare" hidden aria-live="polite">
-      <div class="panel-head"><h2 id="cmp-title">What changed</h2><button type="button" class="ghost" id="cmp-close">Close</button></div>
+      <div class="panel-head"><h2 id="cmp-title">What changed</h2><button type="button" class="btn-ghost small" id="cmp-close">Close</button></div>
       <div class="cmp-numbers" id="cmp-numbers"></div>
       <div class="cmp-lists">
         <div><h3 class="sub good">Fixed since the previous audit</h3><ol class="cmp-list" id="cmp-resolved"></ol></div>
@@ -104,12 +104,12 @@
         <thead><tr><th scope="col">What</th><th scope="col">When</th><th scope="col">From</th><th scope="col">Result</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
         <tbody></tbody>
       </table></div>
-      <p class="more"><button type="button" class="ghost" id="history-more" hidden>Show more</button></p>
+      <p class="more"><button type="button" class="btn-ghost small" id="history-more" hidden>Show more</button></p>
     </div>
 
     <div class="panel" id="tokens">
       <div class="panel-head"><h2>AI apps &amp; tokens</h2><p class="meta">How your AI assistants reach Justify as you</p></div>
-      <div class="endpoint"><code id="mcp-url"></code><button type="button" class="ghost copy" id="mcp-copy">Copy</button></div>
+      <div class="endpoint"><code id="mcp-url"></code><button type="button" class="btn-ghost small copy" id="mcp-copy">Copy</button></div>
       <p class="meta">Add this URL to Claude, ChatGPT, Copilot, Cursor or Gemini CLI; the app sends you here to approve it once. Setup for each app is on the <a href="/#connect">home page</a>.</p>
       <div class="two">
         <div>
@@ -126,7 +126,7 @@
           </form>
           <div class="token-once" id="token-once" hidden>
             <p><b>Copy it now</b> — Justify keeps only a fingerprint and cannot show it again.</p>
-            <pre class="code"><code id="token-value"></code><button type="button" class="ghost copy" id="token-copy">Copy</button></pre>
+            <pre class="code"><code id="token-value"></code><button type="button" class="btn-ghost small copy" id="token-copy">Copy</button></pre>
           </div>
           <ul class="plain-list" id="token-list"></ul>
         </div>
@@ -145,7 +145,7 @@
 
 <footer class="foot">
   <div class="wrap foot-grid">
-    <div class="foot-brand"><svg class="mark" aria-hidden="true"><use href="#mark"/></svg><div><b>Justify</b><span>Every line earns its place.</span></div></div>
+    <div class="foot-brand"><svg class="mark" viewBox="0 0 64 64" aria-hidden="true"><use href="#mark"/></svg><div><b>Justify</b><span>Every line earns its place.</span></div></div>
     <ul class="foot-links">
       <li><a href="/">Audit a repository</a></li>
       <li><a href="https://github.com/BPSKartik/justify" rel="noopener">Source on GitHub</a></li>

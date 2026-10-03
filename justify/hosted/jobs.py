@@ -30,6 +30,7 @@ from datetime import datetime, timezone
 from .. import __version__
 from .db import Database
 from .fetch import FetchError, RepoRef, clone, resolve
+from .seal import seal
 from .storage import Results
 
 ACTIVE = ("queued", "cloning", "scanning")
@@ -80,10 +81,18 @@ class Jobs:
         self.queue_max, self.scan_timeout = queue_max, scan_timeout
         self.clone_timeout, self.max_mb, self.scan_mem_mb = clone_timeout, max_mb, scan_mem_mb
         self.q: queue.Queue[str] = queue.Queue()
+        self.keys: dict[str, bytes] = {}     # private jobs' sealing keys: memory only, gone when the job ends
         # a restart loses the queue: say so rather than leave jobs spinning forever
         self.database.write("UPDATE scans SET status='failed', error=?, error_code='interrupted', finished=? "
                             "WHERE status IN ('queued','cloning','scanning')",
                             ("The service restarted during this scan. Start it again.", time.time()))
+        # private results kept before sealing existed are deleted rather than left readable
+        for row in self.database.all("SELECT id FROM scans WHERE visibility='private' AND status='done' AND sealed=0"):
+            self.results.delete(row["id"])
+            self.database.write("UPDATE scans SET status='failed', error_code='resealed', error=? WHERE id=?",
+                                ("This private result was kept before results were sealed, so it was deleted. "
+                                 "Upload the code again for a sealed result.", row["id"]))
+        self.token_fn = None             # installation id -> GitHub App token, for private repositories
         self.clone_fn = clone            # tests replace these with local fixtures
         self.resolve_fn = resolve
         self.scan_argv = lambda repo_dir: [sys.executable, "-m", "justify.cli", "scan", repo_dir, "--json",
@@ -117,11 +126,12 @@ class Jobs:
 
     def _public(self, row: sqlite3.Row, position: int = 0, with_result: bool = True) -> dict:
         started, finished = row["started"], row["finished"]
-        result = self.results.get(row["id"]) if (with_result and row["status"] == "done") else None
+        sealed = bool(row["sealed"])
+        result = self.results.get(row["id"]) if (with_result and row["status"] == "done" and not sealed) else None
         return {
             "id": row["id"], "kind": row["kind"], "repo": row["repo"], "url": row["url"], "ref": row["ref"],
             "sha": row["sha"], "status": row["status"], "position": position,
-            "private": row["visibility"] == "private",
+            "private": row["visibility"] == "private", "sealed": sealed,
             "stage": json.loads(row["stage"]) if row["stage"] else None,
             "created": _iso(row["created"]), "started": _iso(started), "finished": _iso(finished),
             "duration_s": round(finished - started, 1) if (started and finished) else None,
@@ -154,7 +164,7 @@ class Jobs:
 
     def audits_of(self, repo: str, owner: str | None = None, limit: int = 30) -> list[dict]:
         """Finished audits of one repository, newest first — what a comparison is drawn from."""
-        rows = self.database.all("SELECT id, sha, finished, summary, visibility, owner FROM scans WHERE lower(repo)=lower(?) "
+        rows = self.database.all("SELECT id, sha, finished, summary, visibility, owner, sealed FROM scans WHERE lower(repo)=lower(?) "
                                  "AND status='done' ORDER BY finished DESC LIMIT ?", (repo, limit * 3))
         out, seen = [], set()
         for r in rows:
@@ -163,7 +173,7 @@ class Jobs:
             if r["sha"] and r["sha"] in seen:
                 continue
             seen.add(r["sha"])
-            out.append({"id": r["id"], "sha": r["sha"], "finished": _iso(r["finished"]),
+            out.append({"id": r["id"], "sha": r["sha"], "finished": _iso(r["finished"]), "sealed": bool(r["sealed"]),
                         "summary": json.loads(r["summary"]) if r["summary"] else None})
             if len(out) >= limit:
                 break
@@ -209,9 +219,36 @@ class Jobs:
         self.q.put(job_id)
         return self.get(job_id, viewer=owner), True
 
-    def submit_upload(self, src_dir: str, name: str, owner: str, client: str = "", charge=None) -> dict:
+    def submit_private_repo(self, rr: RepoRef, owner: str, installation_id: int, key: bytes, client: str = "",
+                            charge=None) -> dict:
+        """Queue a private GitHub repository the person installed the Justify GitHub App on. Never
+        cached for anyone, and sealed with the person's key like an upload."""
+        if not key or len(key) != 32:
+            raise FetchError("A private audit needs the key that seals its result.", 400, "no_key")
+        token = self.token_fn(installation_id) if self.token_fn else None
+        sha, branch = self.resolve_fn(rr, token=token)
+        with self.database.transaction() as tx:
+            queued = tx.execute("SELECT COUNT(*) FROM scans WHERE status='queued'").fetchone()[0]
+            if queued >= self.queue_max:
+                raise FetchError("The scanner is busy right now. Try again in a few minutes.", 503, "busy")
+            if charge:
+                charge(tx)
+            job_id = "s_" + secrets.token_hex(5)
+            tx.execute("INSERT INTO scans (id, kind, repo, url, ref, sha, version, status, created, client, owner, "
+                       "visibility, inst) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                       (job_id, "github-private", rr.slug, rr.url, branch, sha, __version__, "queued", time.time(),
+                        client, owner, "private", int(installation_id)))
+        self.keys[job_id] = key
+        self.q.put(job_id)
+        return self.get(job_id, viewer=owner)
+
+    def submit_upload(self, src_dir: str, name: str, owner: str, client: str = "", charge=None,
+                      key: bytes | None = None) -> dict:
         """Queue code someone uploaded. It was already unpacked into `src_dir`, which this job
-        now owns and deletes when it finishes."""
+        now owns and deletes when it finishes. `key` seals the result (see seal.py); it is held
+        in memory until the job ends and never written anywhere."""
+        if not key or len(key) != 32:
+            raise FetchError("A private audit needs the key that seals its result.", 400, "no_key")
         with self.database.transaction() as tx:
             queued = tx.execute("SELECT COUNT(*) FROM scans WHERE status='queued'").fetchone()[0]
             if queued >= self.queue_max:
@@ -223,6 +260,7 @@ class Jobs:
                        "VALUES (?,?,?,?,?,?,?,?,?,?)",
                        (job_id, "upload", f"upload/{name}", __version__, "queued", time.time(), client, owner,
                         "private", src_dir))
+        self.keys[job_id] = key
         self.q.put(job_id)
         return self.get(job_id, viewer=owner)
 
@@ -259,24 +297,41 @@ class Jobs:
                 self._update(job_id, status="cloning", started=started,
                              stage=json.dumps({"stage": "clone", "message": "downloading the repository and its history"}))
                 dest = os.path.join(work, name)
-                sha = self.clone_fn(rr, row["ref"], dest, self.clone_timeout, self.max_mb) or row["sha"]
+                extra = {}
+                if row["kind"] == "github-private":
+                    if not self.token_fn:
+                        raise FetchError("Private repositories are not switched on here.", 400, "no_app")
+                    extra["token"] = self.token_fn(row["inst"])
+                sha = self.clone_fn(rr, row["ref"], dest, self.clone_timeout, self.max_mb, **extra) or row["sha"]
+                extra.clear()
                 self._update(job_id, status="scanning", sha=sha,
                              stage=json.dumps({"stage": "ingest", "message": "reading every file"}))
             result = self._scan(job_id, dest, work)
             result["root"] = row["repo"]
-            if row["kind"] == "github":
+            if row["kind"] in ("github", "github-private"):
                 result["github_blob_base"] = f"https://github.com/{row['repo']}/blob/{sha}/"
                 result["sha"] = sha
-            self.results.put(job_id, result)
+            sealed = 0
+            if row["visibility"] == "private":
+                key = self.keys.pop(job_id, None)
+                if key is None:
+                    raise FetchError("The key that seals this private result is gone — the service restarted. "
+                                     "Upload the code again.", 410, "key_gone")
+                self.results.put_sealed(job_id, seal(key, job_id, result))
+                del key
+                sealed = 1
+            else:
+                self.results.put(job_id, result)
             self._update(job_id, status="done", finished=time.time(), summary=json.dumps(summarize(result)),
-                         stage=json.dumps({"stage": "done", "message": "audit complete"}), src=None)
+                         stage=json.dumps({"stage": "done", "message": "audit complete"}), src=None, sealed=sealed)
             print(json.dumps({"event": "scan_done", "id": job_id, "kind": row["kind"],
-                              "repo": row["repo"] if row["kind"] == "github" else "(upload)",
+                              "repo": row["repo"] if row["kind"] == "github" else "(private)",
                               "files": result.get("files"), "lines": result.get("lines"),
                               "seconds": round(time.time() - started, 1)}), flush=True)
         except FetchError as exc:
             self._update(job_id, status="failed", finished=time.time(), error=str(exc), error_code=exc.code, src=None)
         finally:
+            self.keys.pop(job_id, None)
             shutil.rmtree(work, ignore_errors=True)
             if row["kind"] == "upload" and row["src"]:
                 shutil.rmtree(row["src"], ignore_errors=True)

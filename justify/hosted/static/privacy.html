@@ -4,39 +4,57 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Privacy — Justify</title>
-<meta name="color-scheme" content="light dark">
-<meta name="theme-color" content="#12233f">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#08111f">
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Condensed:wght@600;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body class="plain">
 <main class="consent doc" id="main">
   <a href="/" aria-label="Justify, home"><img class="consent-mark" src="/static/favicon.svg" alt="" width="44" height="44"></a>
-  <h1>What Justify keeps, and why</h1>
+  <h1>What Justify keeps, and who can read it</h1>
   <p class="consent-host">Plainly, in one page. Last changed 3 October 2026.</p>
 
-  <h2>Without an account</h2>
-  <p>Justify keeps the audits you start of public repositories — they are results about public code, cached so the same commit is never scanned twice, and listed under “Recently audited”. To enforce the daily allowance it counts audits per network address per day; those counts are deleted after 60 days.</p>
+  <h2>The short version</h2>
+  <p>To audit code, the service has to read it while the audit runs — a few seconds. After that it keeps nothing it does not need, and nothing private that it can read. Your code is deleted. A private result is sealed with a key that never leaves your browser or your AI app.</p>
 
-  <h2>With an account</h2>
+  <h2>Code you upload, or share with an AI app</h2>
   <ul>
-    <li><b>Your profile</b> from GitHub or Microsoft: name, username, picture link and, if the provider shares it, email. Never a password, and never access to your repositories.</li>
-    <li><b>Your history</b>: which audits you asked for and when, so the dashboard can show trends and what changed.</li>
-    <li><b>Your tokens and connected apps</b>, stored only as fingerprints (SHA-256): the database cannot reveal them.</li>
-    <li><b>One cookie</b>, to keep you signed in. No tracking, no analytics, no advertising.</li>
+    <li>It is unpacked into a temporary folder, audited, and that folder is deleted the moment the audit ends — finished or failed.</li>
+    <li>It is never sent to a model, never logged, never kept.</li>
+    <li>A zip is unpacked as if it were hostile: no paths outside itself, no links, no git settings that could run anything.</li>
   </ul>
 
-  <h2>Code you upload</h2>
-  <p>It is unpacked on the server, audited, and deleted when the audit finishes. The result — file names, line numbers, unit names, never your code — is visible only to your account. Nothing is sent to a model or to anyone else.</p>
+  <h2>Private results are sealed</h2>
+  <ul>
+    <li>Before uploading, your browser makes a random 256-bit key and keeps it. The server holds the key in memory only while your audit runs, encrypts the result with AES-256-GCM, writes the ciphertext, and forgets the key.</li>
+    <li>When you open the audit, your browser downloads the ciphertext and decrypts it itself. The server never sees the key again — so neither Justify nor anyone with access to its storage can read the result.</li>
+    <li>Code shared through an AI app is sealed the same way; the app is given the key with the result.</li>
+    <li>To open a sealed audit on another device, use “Save the key” on the result. If the key is lost, the result cannot be recovered — by you or by us.</li>
+  </ul>
+
+  <h2>Audits of public repositories</h2>
+  <p>They are about public code, so their results are public: anyone with the link can open them, and they appear under “Recently audited”. They are cached by commit so the same commit is never scanned twice.</p>
+
+  <h2>Your account</h2>
+  <ul>
+    <li>A display name. With GitHub, also your username and picture — both public on GitHub already.</li>
+    <li>No email address, no password, and no key to your GitHub or Microsoft account: the provider's token is used once to read your name and then dropped.</li>
+    <li>Your history: which audits you ran, with their numbers (counts, ratios, languages) — never code or file names.</li>
+    <li>Sessions, personal tokens and AI-app tokens are stored only as SHA-256 fingerprints.</li>
+  </ul>
+
+  <h2>Your network address</h2>
+  <p>Never stored. Without an account, the free daily allowance is counted under a keyed hash of your address; the key lives only in the server's memory and is replaced every day, so the counts cannot be turned back into addresses.</p>
 
   <h2>Where it lives</h2>
-  <p>On Microsoft Azure in Central India: the service, and a private storage container it reaches with its own managed identity. No storage key exists.</p>
+  <p>Microsoft Azure, Central India. The database and results are mirrored to a private Blob Storage container that the service reaches with its own managed identity; the storage account refuses keys, and Azure encrypts it at rest. Microsoft sign-in also uses that identity — there is no client secret.</p>
 
   <h2>Deleting it</h2>
-  <p>Remove any audit from your history on the dashboard; deleting a private audit erases its result. <b>Delete my account</b>, at the bottom of the dashboard, erases your profile, history, tokens, connected apps and every private audit at once. Justify is open source: <a href="https://github.com/BPSKartik/justify">read exactly what it does</a>.</p>
+  <p>Remove any audit from your history on the dashboard; deleting a private audit erases its sealed result. <b>Delete my account</b>, at the bottom of the dashboard, erases your profile, history, tokens, connected apps and every private audit at once. Justify is open source: <a href="https://github.com/BPSKartik/justify">read exactly what it does</a>.</p>
 </main>
 <a class="back-home" href="/">Back to Justify</a>
 </body>

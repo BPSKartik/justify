@@ -114,9 +114,10 @@
     if (file.size > 25 * 1024 * 1024) { showUploadError("That zip is larger than 25 MB. Leave out build output and dependencies."); return; }
     showUploadError("");
     setUploadBusy(`Uploading ${file.name}…`);
+    const key = J.vault.newKey();
     const { status, body } = await api(`/api/uploads?name=${encodeURIComponent(file.name)}`,
-      { method: "POST", body: file, headers: { "Content-Type": "application/zip" } });
-    afterUpload(status, body);
+      { method: "POST", body: file, headers: { "Content-Type": "application/zip", "X-Justify-Result-Key": key } });
+    afterUpload(status, body, key);
   }
 
   async function uploadFiles(entries, name) {
@@ -133,12 +134,15 @@
       files.push({ path, content: await file.text() });
     }
     setUploadBusy(`Uploading ${fmt(files.length)} files…`);
-    const { status, body } = await api("/api/uploads", { method: "POST", body: JSON.stringify({ name, files }) });
-    afterUpload(status, body);
+    const key = J.vault.newKey();
+    const { status, body } = await api("/api/uploads", { method: "POST", body: JSON.stringify({ name, files }),
+      headers: { "X-Justify-Result-Key": key } });
+    afterUpload(status, body, key);
   }
 
-  function afterUpload(status, body) {
+  function afterUpload(status, body, key) {
     setUploadBusy("");
+    if (body && body.id && status < 400) J.vault.set(body.id, key);   // the only copy of the key
     if (status === 401) { selectSource("upload"); return; }
     if (status === 429 && body && body.code === "quota") { showUploadError(body.error); return; }
     if (!body || status >= 400 || status === 0) { showUploadError((body && body.error) || "The upload did not go through. Try again."); return; }
@@ -196,7 +200,7 @@
   function follow(scan, scroll = "smooth") {
     current = scan.id;
     clearTimeout(pollTimer);
-    if (scan.status === "done" && scan.result) { renderResult(scan, scroll); return; }
+    if (scan.status === "done" && (scan.result || scan.sealed)) { openDone(scan, scroll); return; }
     renderScan(scan);
     $("scan").scrollIntoView({ behavior: still ? "auto" : "smooth", block: "start" });
     const poll = async () => {
@@ -205,12 +209,45 @@
       if (current !== scan.id) return;
       if (status === 404 || (!body && status !== 0)) { renderFailed({ error: "That scan no longer exists. Start it again." }); return; }
       if (status === 0 || !body) { pollTimer = setTimeout(poll, 3000); return; }
-      if (body.status === "done") { renderResult(body, "smooth"); return; }
+      if (body.status === "done") { openDone(body, "smooth"); return; }
       if (body.status === "failed") { renderFailed(body); return; }
       renderScan(body);
       pollTimer = setTimeout(poll, 1500);
     };
     pollTimer = setTimeout(poll, 1200);
+  }
+
+  async function openDone(scan, scroll, keyText) {
+    if (!scan.sealed) { $("sealed-box").hidden = true; renderResult(scan, scroll); return; }
+    const key = keyText || J.vault.get(scan.id);
+    if (key) {
+      try {
+        const result = await J.unseal(scan.id, key);
+        if (keyText) J.vault.set(scan.id, keyText);
+        $("sealed-box").hidden = true;
+        renderResult({ ...scan, result, key }, scroll);
+        return;
+      } catch {
+        if (keyText) { $("sealed-error").textContent = "That key does not open this audit."; $("sealed-error").hidden = false; return; }
+      }
+    }
+    showSealed(scan);
+  }
+
+  function showSealed(scan) {
+    stopClock();
+    $("scan").hidden = true;
+    $("result").hidden = false;
+    $("sealed-box").hidden = false;
+    $("sealed-error").hidden = true;
+    for (const id of ["balance", "madeof", "cityview", "authors", "no-git", "findings"]) $(id).hidden = true;
+    $("result-kind").textContent = "Private audit";
+    $("private-badge").hidden = false;
+    $("result-title").textContent = scan.repo.replace(/^upload\//, "");
+    $("result-meta").textContent = "uploaded code · sealed";
+    for (const id of ["copy-plan", "copy-link", "download-md", "save-key"]) $(id).hidden = true;
+    $("sealed-form").onsubmit = (e) => { e.preventDefault(); openDone(scan, "auto", $("sealed-key").value); };
+    $("result").scrollIntoView({ behavior: "auto", block: "start" });
   }
 
   function renderScan(scan) {
@@ -327,9 +364,24 @@
     const md = `/api/scans/${encodeURIComponent(scan.id)}/report.md`;
     $("download-md").href = md;
     $("download-md").setAttribute("download", `justify-${scan.repo.replace(/\//g, "-")}.md`);
+    for (const id of ["balance", "findings", "copy-plan", "download-md"]) $(id).hidden = false;
     $("copy-plan").onclick = () => copy(fixPlan(scan), "Fix plan");
     $("copy-link").onclick = () => copy(`${ORIGIN}/s/${scan.id}`, "Link");
     $("copy-link").hidden = scan.private;
+    $("save-key").hidden = !scan.sealed;
+    if (scan.sealed) {
+      // nothing readable is on the server: downloads are made here, from what this page decrypted
+      const name = scan.repo.replace(/^upload\//, "");
+      $("download-md").removeAttribute("href");
+      $("download-md").textContent = "Download .json";
+      $("download-md").onclick = (e) => { e.preventDefault(); J.saveFile(`justify-${name}.json`, JSON.stringify(scan.result, null, 2), "application/json"); };
+      $("save-key").onclick = () => J.saveFile(`justify-${name}-key.txt`,
+        `Justify — key for the sealed audit ${scan.id} (${name})\n\n${scan.key}\n\nOpen ${ORIGIN}/s/${scan.id} and paste this key. ` +
+        "Justify does not keep it and cannot recover it.\n");
+    } else {
+      $("download-md").textContent = "Download .md";
+      $("download-md").onclick = null;
+    }
     if (scroll) $("result").scrollIntoView({ behavior: still || scroll === "auto" ? "auto" : "smooth", block: "start" });
     loadRecent();
   }
@@ -737,6 +789,8 @@
       if (e.key === "ArrowRight" || e.key === "ArrowLeft") { selectSource($("tab-repo").getAttribute("aria-selected") === "true" ? "upload" : "repo", true); e.preventDefault(); }
     });
     wireUpload();
+    $("repos-owner").addEventListener("submit", (e) => { e.preventDefault(); yourRepos($("repos-owner-input").value); });
+    $("repos-filter").addEventListener("input", drawRepos);
     $("search").addEventListener("input", () => { shown = PAGE; renderItems(); });
     $("kind").addEventListener("change", () => { shown = PAGE; renderItems(); });
     $("file-filter-clear").addEventListener("click", () => setFileFilter(""));
@@ -754,14 +808,117 @@
     window.addEventListener("popstate", route);
 
     heroCity();
+    reveal();
     const [cfg, user] = await Promise.all([J.loadConfig(), J.renderAuth()]);
     config = cfg;
     me = user;
     renderAllowance();
     renderClients();
-    if (new URLSearchParams(location.search).get("upload") === "1") selectSource("upload");
+    yourRepos();
+    const qs = new URLSearchParams(location.search);
+    if (qs.get("upload") === "1") selectSource("upload");
+    if (qs.get("repos") === "1" && me) setTimeout(() => $("repos-wrap").scrollIntoView({ behavior: "auto" }), 50);
     route();
     loadRecent();
+  }
+
+  /* ---------------------------------------------------------------- sections rise into view */
+  function reveal() {
+    if (still || !("IntersectionObserver" in window)) return;
+    const io = new IntersectionObserver((entries) => {
+      for (const e of entries) if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
+    }, { rootMargin: "0px 0px -8% 0px" });
+    for (const n of document.querySelectorAll(".numbers .num, .tile, .pipeline li, .rules li, .panel, .data-map, .qa details, .cta-box")) {
+      n.classList.add("reveal");
+      io.observe(n);
+    }
+  }
+
+  /* ---------------------------------------------------------------- the signed-in person's repositories */
+  let repoList = [], repoOwner = "", privateList = [];
+  async function yourRepos(owner) {
+    if (!me) return;
+    const gh = (me.providers || []).includes("github") ? me.user.login : "";
+    repoOwner = (owner || repoOwner || gh || "").trim();
+    $("repos-wrap").hidden = false;
+    $("repos-owner-input").value = repoOwner;
+    await privateRepos(gh);
+    if (!repoOwner) {
+      repoList = [];
+      drawRepos();
+      $("repos-note").textContent = "Type a GitHub user or organisation to list its public repositories. Signing in with GitHub lists yours.";
+      return;
+    }
+    $("repos-note").textContent = "Loading from GitHub…";
+    try {
+      repoList = await J.githubRepos(repoOwner);
+      $("repos-note").textContent = `${J.plural(repoList.length, "public repository", "public repositories")} of ${repoOwner}` +
+        (privateList.length ? ` and ${J.plural(privateList.length, "private one")} you connected` : "") +
+        " — public ones listed by GitHub to this browser directly.";
+    } catch (err) {
+      repoList = [];
+      $("repos-note").textContent = err.message;
+    }
+    drawRepos();
+  }
+
+  /* private repositories, through the Justify GitHub App the person installed on their own account */
+  async function privateRepos(gh) {
+    const box = $("repos-actions");
+    box.replaceChildren();
+    privateList = [];
+    if (!config.github_app) return;
+    if (!gh) {
+      box.append(el("span", { text: "Sign in with GitHub to audit your private repositories." }));
+      return;
+    }
+    const { status, body } = await api("/api/me/private-repos");
+    if (status !== 200 || !body || !body.enabled) return;
+    privateList = body.repos || [];
+    if (body.connected) {
+      box.append(el("span", { class: "chip private", text: `${fmt(privateList.length)} private connected` }),
+        el("a", { class: "btn-ghost small", href: "/github/connect" }, "Add repositories"));
+    } else {
+      box.append(el("a", { class: "btn-primary small", href: "/github/connect" }, "Connect private repositories"),
+        el("span", { text: "Read-only, only the repositories you pick. Results are sealed." }));
+    }
+  }
+
+  async function startPrivate(fullName) {
+    const key = J.vault.newKey();
+    const { status, body } = await api("/api/scans", { method: "POST", body: JSON.stringify({ repo: fullName, private: true }),
+      headers: { "X-Justify-Result-Key": key } });
+    if (!body || status >= 400 || status === 0) { $("repos-note").textContent = (body && body.error) || "That did not start. Try again."; return; }
+    J.vault.set(body.id, key);
+    history.pushState({ id: body.id }, "", `/s/${body.id}`);
+    follow(body);
+  }
+
+  function drawRepos() {
+    const q = $("repos-filter").value.trim().toLowerCase();
+    const grid = $("repo-grid");
+    grid.replaceChildren();
+    const seen = new Set(privateList.map((r) => r.full_name.toLowerCase()));
+    const all = [...privateList, ...repoList.filter((r) => !seen.has(r.full_name.toLowerCase()))];
+    const list = all.filter((r) => !q || r.full_name.toLowerCase().includes(q) || (r.description || "").toLowerCase().includes(q));
+    for (const r of list.slice(0, 30)) {
+      const dot = el("span", { class: "rc-dot" });
+      dot.style.background = J.langColor(r.language);
+      const tag = r.private ? el("span", { class: "chip private", text: "private" })
+        : r.fork ? el("span", { class: "chip", text: "fork" }) : r.archived ? el("span", { class: "chip", text: "archived" }) : null;
+      const go = () => {
+        if (r.private) startPrivate(r.full_name);
+        else { $("repo").value = r.full_name; startScan(r.full_name); }
+      };
+      grid.append(el("li", {}, el("div", { class: "repo-card" },
+        el("div", { class: "rc-top" }, el("span", { class: "rc-name", text: r.private ? r.full_name : r.name }), tag),
+        el("p", { class: "rc-desc", text: r.description || "No description." }),
+        el("div", { class: "rc-meta" }, r.language ? el("span", {}, dot, r.language) : null,
+          r.stars ? el("span", { text: `★ ${fmt(r.stars)}` }) : null,
+          r.pushed_at ? el("span", { text: `pushed ${J.ago(r.pushed_at)}` }) : null),
+        el("button", { type: "button", class: "btn-primary small", onclick: go }, r.private ? "Audit privately" : "Audit"))));
+    }
+    if (!list.length && all.length) grid.append(el("li", { class: "meta", text: "Nothing matches." }));
   }
 
   function route() {

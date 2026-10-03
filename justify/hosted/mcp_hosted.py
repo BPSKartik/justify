@@ -28,6 +28,7 @@ except ImportError:                      # pragma: no cover
 from .accounts import QuotaExceeded
 from .fetch import FetchError, parse
 from .ratelimit import client_ip
+from .seal import SealError, key_text, new_key, parse_key, unseal
 from .uploads import clean_name, unpack_files
 
 WAIT_S = 110
@@ -169,7 +170,7 @@ def build(jobs, accounts, base_url: str, auth_provider=None, auth_settings=None)
         user, ip = who(ctx)
         try:
             scan, _ = await anyio.to_thread.run_sync(lambda: jobs.submit(
-                rr, f"mcp:{ip}", owner=user["id"] if user else None,
+                rr, "mcp", owner=user["id"] if user else None,
                 charge=lambda tx: accounts.charge(user, ip, tx, channel="mcp")))
         except QuotaExceeded as exc:
             return {"error": str(exc), "used": exc.used, "limit": exc.limit,
@@ -182,34 +183,53 @@ def build(jobs, accounts, base_url: str, auth_provider=None, auth_settings=None)
     @server.tool(title="Audit code the user shares", annotations=_ann())
     async def audit_code(files: list[dict], name: str = "shared-code", ctx: Context | None = None) -> dict:
         """Audit the user's own code that is not on GitHub — files they shared in this chat. Pass every file as
-        {"path": "src/app.py", "content": "<the whole file>"} (up to 2,000 files, 8 MB). The result is private to the
-        user's account. Same audit as scan_github_repo, without authorship (there is no git history)."""
+        {"path": "src/app.py", "content": "<the whole file>"} (up to 2,000 files, 8 MB). The code is deleted after the
+        audit and the result is sealed with a key returned here as result_key — Justify keeps no copy it can read.
+        Same audit as scan_github_repo, without authorship (there is no git history)."""
         user, ip = who(ctx)
         if user is None:
             return {"error": "Auditing your own code needs a Justify account, so the result stays private to you. "
                              "Connect Justify with sign-in, or use a public GitHub repository."}
+        key = new_key()                       # made here, handed to the AI app, never stored
         try:
             dest = await anyio.to_thread.run_sync(lambda: unpack_files(files, os.path.join(jobs.dir, "uploads")))
             scan = await anyio.to_thread.run_sync(lambda: jobs.submit_upload(
-                dest, clean_name(name), user["id"], f"mcp:{ip}",
-                charge=lambda tx: accounts.charge(user, ip, tx, channel="mcp")))
+                dest, clean_name(name), user["id"], "mcp",
+                charge=lambda tx: accounts.charge(user, ip, tx, channel="mcp"), key=key))
         except QuotaExceeded as exc:
             return {"error": str(exc), "used": exc.used, "limit": exc.limit}
         except FetchError as exc:
             return {"error": str(exc)}
         await anyio.to_thread.run_sync(lambda: accounts.remember(user, scan["id"], "mcp-upload"))
-        return compact(await wait_for(scan["id"], user["id"]), base_url)
+        out = await opened(await wait_for(scan["id"], user["id"]), key)
+        out["result_key"] = key_text(key)
+        out["sealed_note"] = ("Justify kept only a sealed copy of this result. result_key opens it: pass it to "
+                              "get_scan_result to see the audit again. Without it, nobody can — Justify included.")
+        return out
 
     @server.tool(title="Get a scan's result", annotations=_ann())
-    async def get_scan_result(scan_id: str, ctx: Context | None = None) -> dict:
+    async def get_scan_result(scan_id: str, result_key: str = "", ctx: Context | None = None) -> dict:
         """The result of a scan started by scan_github_repo or audit_code, by its scan_id. Waits briefly if it is
-        still running."""
+        still running. A private audit from audit_code is sealed: pass the result_key that audit_code returned."""
         if not isinstance(scan_id, str) or not scan_id.startswith("s_") or len(scan_id) > 40:
             return {"error": "That is not a scan_id from scan_github_repo or audit_code."}
         user, _ = who(ctx)
         scan = await wait_for(scan_id, user["id"] if user else None)
         if not scan:
             return {"error": "No scan with that id. Start one with scan_github_repo."}
+        return await opened(scan, parse_key(result_key))
+
+    async def opened(scan: dict, key: bytes | None) -> dict:
+        """compact(), after unsealing a private result with the key the caller holds."""
+        if scan and scan.get("sealed") and scan["status"] == "done":
+            if key is None:
+                return {"scan_id": scan["id"], "status": "done", "sealed": True,
+                        "error": "This private result is sealed. Pass the result_key that audit_code returned."}
+            data = await anyio.to_thread.run_sync(lambda: jobs.results.get_sealed(scan["id"]))
+            try:
+                scan = {**scan, "result": unseal(key, scan["id"], data or b"")}
+            except SealError as exc:
+                return {"scan_id": scan["id"], "status": "done", "sealed": True, "error": str(exc)}
         return compact(scan, base_url)
 
     @server.tool(title="The user's recent audits", annotations=_ann())

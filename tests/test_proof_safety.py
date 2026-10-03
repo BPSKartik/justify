@@ -1,7 +1,6 @@
 """Stage 6 under attack: every way a proof could "pass" without meaning anything,
 found by red-teaming the proof stage, and what it must say instead."""
 
-import os
 import sys
 
 from justify.engine import run
@@ -158,7 +157,6 @@ def test_one_pathological_function_does_not_crash_the_scan(make_repo):
 
 
 def test_tests_never_see_secrets_and_hung_children_are_killed(make_repo, monkeypatch):
-    import os
     import time as _time
     monkeypatch.setenv("GITHUB_TOKEN", "ghp_should_not_leak")
     monkeypatch.setenv("MY_SERVICE_API_KEY", "sk_should_not_leak")

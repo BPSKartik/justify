@@ -154,18 +154,40 @@
     }
   }
 
+  function diffResults(old, neu) {
+    const key = (f) => `${f.kind}|${f.file}|${f.name}`;
+    const pick = (r) => new Map((r.findings || []).filter((f) => f.verdict === "REMOVE" || f.verdict === "SIMPLIFY").map((f) => [key(f), f]));
+    const before = pick(old), after = pick(neu);
+    const brief = (f) => ({ verdict: f.verdict, kind: f.kind, file: f.file, line: f.line, name: f.name, lines: f.lines || 1 });
+    const resolved = [...before].filter(([k]) => !after.has(k)).map(([, f]) => brief(f));
+    const added = [...after].filter(([k]) => !before.has(k)).map(([, f]) => brief(f));
+    const m0 = old.metrics || {}, m1 = neu.metrics || {};
+    return { resolved: resolved.slice(0, 100), resolved_total: resolved.length, resolved_lines: resolved.reduce((s, f) => s + f.lines, 0),
+      new: added.slice(0, 100), new_total: added.length, jlr_before: m0.jlr_percent, jlr_after: m1.jlr_percent,
+      dead_before: m0.dead_weight_lines, dead_after: m1.dead_weight_lines, dup_before: m0.duplicate_lines, dup_after: m1.duplicate_lines };
+  }
+
   async function openCompare(repo, name) {
     const { status, body } = await api(`/api/me/compare?repo=${encodeURIComponent(repo)}`);
     if (status !== 200 || !body) { toast("Could not load the comparison"); return; }
     const panel = $("compare");
     panel.hidden = false;
     $("cmp-title").textContent = `What changed in ${name}`;
-    const d = body.diff;
+    let d = body.diff;
     const nums = $("cmp-numbers");
     nums.replaceChildren();
     const [a0, a1] = [body.audits[1], body.audits[0]];
+    let why = "The earlier audit's details are no longer available to compare.";
+    if (!d && a0 && a1 && (a0.sealed || a1.sealed)) {
+      // sealed audits are compared here, in the browser that holds their keys — the server cannot
+      const k0 = J.vault.get(a0.id), k1 = J.vault.get(a1.id);
+      if (k0 && k1) {
+        try { d = diffResults(await J.unseal(a0.id, k0), await J.unseal(a1.id, k1)); } catch { d = null; }
+      }
+      if (!d) why = "These audits are sealed. Open the dashboard in the browser where you ran them, and it compares them there.";
+    }
     if (!d) {
-      nums.append(el("p", { class: "meta", text: "The earlier audit's details are no longer available to compare." }));
+      nums.append(el("p", { class: "meta", text: why }));
     } else {
       const pair = (label, before, after, digits, goodUp, unit = "") => el("div", { class: "cmp-num" }, el("span", { class: "stat-label", text: label }),
         el("b", {}, before == null ? "—" : `${fmt(before, digits)}${unit}`, el("span", { class: "arrow", text: " → " }), after == null ? "—" : `${fmt(after, digits)}${unit}`),

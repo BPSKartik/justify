@@ -71,8 +71,9 @@ dead weight, gold for copies, violet for AI-signed lines — next to the line it
   Cursor Agent, Aider). Code pasted from a chat window has no signature; it is reported as *no AI
   trace*, never as human, and a history too thin to tell is said to be.
 - **Accounts** (GitHub or Microsoft sign-in, public profile only): a history of your audits with
-  trends and *what changed since the last audit*, a daily allowance, private uploads of your own
-  code (deleted after the audit; results visible only to you), connected AI apps and personal tokens.
+  trends and *what changed since the last audit*, a daily allowance, your GitHub repositories one
+  click from an audit, private uploads and private repositories (results sealed so only you can
+  read them), connected AI apps and personal tokens.
 - **MCP with sign-in.** AI apps connect with standard OAuth (dynamic client registration, PKCE) or a
   personal token, and get a fix plan, file by file. Tools: `scan_github_repo`, `audit_code`,
   `get_scan_result`, `my_audits`.
@@ -90,8 +91,18 @@ The hosted service reads code only: it never runs the code or its tests, and nev
 | `JUSTIFY_MICROSOFT_CLIENT_ID`, `JUSTIFY_MICROSOFT_CLIENT_SECRET`, `JUSTIFY_MICROSOFT_TENANT` | turn on "Sign in with Microsoft" (callback `/auth/microsoft/callback`) |
 | `JUSTIFY_ANON_DAILY`, `JUSTIFY_USER_DAILY`, `JUSTIFY_USER_CONCURRENT` | new audits a day without / with an account; audits running at once |
 | `JUSTIFY_ADMINS` | accounts with no daily cap, e.g. `github:BPSKartik` |
+| `JUSTIFY_GITHUB_APP_ID`, `JUSTIFY_GITHUB_APP_SLUG`, `JUSTIFY_GITHUB_APP_KEY` | private repositories through a GitHub App (Contents: read, Metadata: read; setup URL `/github/installed`) |
 | `JUSTIFY_MCP_AUTH` | `required` (default once sign-in is on) or `off` |
 | `JUSTIFY_BLOB_URL` | a Blob container the database and results are mirrored to, through the app's managed identity — no storage key |
+
+**Private by design.** The service reads code only while an audit runs. Uploaded code is deleted
+when the audit ends. A private result — an upload, code shared through an AI app, or a private
+repository — is sealed with AES-256-GCM under a key made in the person's browser (or AI app); the
+server keeps that key in memory only while the audit runs, so what it stores is ciphertext it
+cannot open, and the page decrypts it with WebCrypto. No email address and no network address is
+stored: the anonymous daily allowance is counted under a keyed hash whose key lives in memory.
+Private repositories are reached through a GitHub App the person installs on repositories they
+pick; each audit uses an installation token that lasts an hour, passed to git in the environment.
 
 With no sign-in provider set, the service runs without accounts, as before. The 3D city is built
 from `frontend/city.js` (`cd frontend && npm ci && npm run build`); the built file is committed, so

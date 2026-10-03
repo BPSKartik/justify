@@ -173,12 +173,63 @@
     };
   }
 
+  /* ---------------------------------------------------------------- sealed private results
+     A private audit is sealed with a key made here, in the browser, and kept only here (and in a file
+     the person may save). The server stores ciphertext it cannot open; this page opens it. */
+  const VAULT = "jfy_keys";
+  const b64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  const fromB64url = (t) => Uint8Array.from(atob(t.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((t.length + 3) % 4)), (c) => c.charCodeAt(0));
+  const vault = {
+    all() { try { return JSON.parse(localStorage.getItem(VAULT) || "{}"); } catch { return {}; } },
+    get(id) { return this.all()[id] || null; },
+    set(id, key) { try { const v = this.all(); v[id] = key; localStorage.setItem(VAULT, JSON.stringify(v)); } catch { /* private mode */ } },
+    forget(id) { try { const v = this.all(); delete v[id]; localStorage.setItem(VAULT, JSON.stringify(v)); } catch { /* ignore */ } },
+    newKey() { return b64url(crypto.getRandomValues(new Uint8Array(32))); },
+  };
+  async function unseal(id, keyText) {
+    const res = await fetch(`/api/scans/${encodeURIComponent(id)}/sealed`, { credentials: "same-origin" });
+    if (!res.ok) throw new Error("missing");
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    const magic = new TextDecoder().decode(bytes.slice(0, 6));
+    if (magic !== "JSEAL1") throw new Error("format");
+    const key = await crypto.subtle.importKey("raw", fromB64url(keyText.trim()), "AES-GCM", false, ["decrypt"]);
+    const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: bytes.slice(6, 18), additionalData: new TextEncoder().encode(id) },
+      key, bytes.slice(18));
+    return JSON.parse(new TextDecoder().decode(plain));
+  }
+  function saveFile(name, text, type = "text/plain") {
+    const a = el("a", { href: URL.createObjectURL(new Blob([text], { type })), download: name });
+    document.body.append(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  }
+
+  /* ---------------------------------------------------------------- someone's public GitHub repositories
+     Asked of GitHub straight from this browser: the server is not in the middle, and keeps nothing. */
+  async function githubRepos(owner) {
+    const cacheKey = `jfy_repos_${owner.toLowerCase()}`;
+    try {
+      const hit = JSON.parse(sessionStorage.getItem(cacheKey) || "null");
+      if (hit && Date.now() - hit.at < 600000) return hit.repos;
+    } catch { /* ignore */ }
+    const res = await fetch(`https://api.github.com/users/${encodeURIComponent(owner)}/repos?per_page=100&sort=pushed`,
+      { headers: { Accept: "application/vnd.github+json" } });
+    if (res.status === 404) throw new Error(`No GitHub user or organisation called ${owner}.`);
+    if (res.status === 403 || res.status === 429) throw new Error("GitHub is limiting requests from this network. Try again in a few minutes.");
+    if (!res.ok) throw new Error("GitHub did not answer. Try again.");
+    const repos = (await res.json()).filter((r) => !r.private).map((r) => ({
+      full_name: r.full_name, name: r.name, description: r.description || "", language: r.language || "",
+      stars: r.stargazers_count || 0, pushed_at: r.pushed_at, fork: !!r.fork, archived: !!r.archived }));
+    try { sessionStorage.setItem(cacheKey, JSON.stringify({ at: Date.now(), repos })); } catch { /* ignore */ }
+    return repos;
+  }
+
   const LANG = { Python: "#4f8fdb", TypeScript: "#3fbfb4", JavaScript: "#e6c547", Go: "#5cc8dc", Rust: "#dc875c", Java: "#cf7a4f",
     Kotlin: "#a97bff", C: "#9fb0c6", "C/C++ header": "#8597ad", "C++": "#d0708c", "C#": "#72c477", Ruby: "#e0505f", PHP: "#9384d0",
     Swift: "#f08a4b", Shell: "#86c06c", Dart: "#4ec3e0", Vue: "#4fc08d", Svelte: "#ff6a3d", Markdown: "#55667c", JSON: "#6b7f99",
     YAML: "#7d8fa8", HTML: "#e37b5b", CSS: "#5b8fe3", "Jupyter notebook": "#f0a64b" };
   const langColor = (name) => LANG[name] || "#7189a8";
 
-  window.Justify = { langColor, plural, $, el, svg, fmt, compact, short, ago, toast, copy, api, loadConfig, loadMe, renderAuth, avatar, signOut,
+  window.Justify = { vault, unseal, saveFile, githubRepos, langColor, plural, $, el, svg, fmt, compact, short, ago, toast, copy, api, loadConfig, loadMe, renderAuth, avatar, signOut,
     city, cityTip, webglOK, get me() { return me; }, get csrf() { return csrf; } };
 })();

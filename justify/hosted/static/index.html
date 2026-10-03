@@ -4,16 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Justify — every line earns its place</title>
-<meta name="description" content="Audit any GitHub repository — or your own code — for code that cannot justify its existence, see how much came from AI-signed commits, and hand the fix plan to your AI assistant over MCP.">
-<meta name="color-scheme" content="light dark">
-<meta name="theme-color" content="#12233f">
+<meta name="description" content="Audit any GitHub repository — or your own code, sealed so only you can read the result — for code that cannot justify its existence. See which AI assistant wrote what, and hand the fix plan to your AI over MCP.">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#08111f">
 <meta property="og:title" content="Justify — every line earns its place">
 <meta property="og:description" content="Find the code that cannot justify its existence, and how much of it came from AI-signed commits.">
 <meta property="og:image" content="/static/og.png">
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Condensed:wght@600;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="/static/styles.css">
 <link rel="modulepreload" href="/static/city.js">
 <script src="/static/common.js" defer></script>
@@ -33,16 +33,17 @@
   </symbol>
 </svg>
 
-<header class="top">
+<header class="top" id="top">
   <div class="wrap top-row">
     <a class="brand" href="/" aria-label="Justify, home">
-      <svg class="mark" aria-hidden="true"><use href="#mark"/></svg>
+      <svg class="mark" viewBox="0 0 64 64" aria-hidden="true"><use href="#mark"/></svg>
       <span>Justify</span>
     </a>
-    <nav aria-label="Sections">
-      <a href="/#finds">What it finds</a>
+    <nav class="nav" aria-label="Sections">
+      <a href="/#product">Product</a>
       <a href="/#how">How it works</a>
       <a href="/#jury">The jury</a>
+      <a href="/#privacy">Privacy</a>
       <a href="/#connect">Connect your AI</a>
     </nav>
     <div class="auth-slot" id="auth-slot"></div>
@@ -50,119 +51,184 @@
 </header>
 
 <main id="main">
+  <!-- ============================================================ hero -->
   <section class="hero" aria-labelledby="hero-title">
+    <div class="hero-glow" aria-hidden="true"></div>
     <div class="wrap hero-grid">
       <div class="hero-copy">
-        <p class="eyebrow">Does the AI assistant actually pay off?</p>
+        <a class="pill" href="/#jury"><span class="pill-dot"></span>New · a jury of six AI models, graded by your tests</a>
         <h1 id="hero-title" aria-label="Every line has to earn its place.">Every line has to earn its <del>own</del> place.</h1>
-        <p class="lede">Justify reads a whole codebase and asks every import, function, class, dependency and copied block one question: <i>why are you here?</i> What cannot answer is dead weight. Justify finds it, shows how much came from AI-signed commits, and hands your AI assistant the fix plan.</p>
+        <p class="lede">Justify reads a whole codebase and asks every import, function, class, dependency and copied block one question — <b>why are you here?</b> It finds what cannot answer, shows which AI assistant wrote it, and hands your AI the fix plan.</p>
 
-        <div class="source-tabs" role="tablist" aria-label="What to audit">
-          <button type="button" role="tab" id="tab-repo" aria-selected="true" aria-controls="scan-form">A GitHub repository</button>
-          <button type="button" role="tab" id="tab-upload" aria-selected="false" aria-controls="upload-form" tabindex="-1">Your own code</button>
+        <div class="audit-box">
+          <div class="source-tabs" role="tablist" aria-label="What to audit">
+            <button type="button" role="tab" id="tab-repo" aria-selected="true" aria-controls="scan-form">GitHub repository</button>
+            <button type="button" role="tab" id="tab-upload" aria-selected="false" aria-controls="upload-form" tabindex="-1">Your own code</button>
+          </div>
+
+          <form id="scan-form" class="scan-form" role="tabpanel" aria-labelledby="tab-repo" novalidate>
+            <label for="repo" class="sr-only">Public GitHub repository</label>
+            <div class="field">
+              <svg class="field-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.33-1.3-1.69-1.3-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.78 1.2 1.78 1.2 1.03 1.77 2.71 1.26 3.37.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.7 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.43-2.7 5.4-5.27 5.69.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
+              <input id="repo" name="repo" type="text" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false"
+                     placeholder="owner/repository or a GitHub URL" aria-describedby="repo-hint repo-error" required>
+              <button id="scan-btn" class="btn-primary" type="submit">Audit it</button>
+            </div>
+            <p id="repo-error" class="field-error" role="alert" hidden></p>
+            <p id="repo-hint" class="hint">Try
+              <button type="button" class="example" data-repo="PrefectHQ/fastmcp">PrefectHQ/fastmcp</button>
+              <button type="button" class="example" data-repo="judeper/FSI-CopilotGov">judeper/FSI-CopilotGov</button>
+              <button type="button" class="example" data-repo="Azure/azure-functions-agents-runtime">Azure/azure-functions-agents-runtime</button></p>
+          </form>
+
+          <form id="upload-form" class="scan-form upload-form" role="tabpanel" aria-labelledby="tab-upload" hidden novalidate>
+            <div class="drop" id="drop" tabindex="0" aria-describedby="drop-note">
+              <svg class="drop-art" viewBox="0 0 48 48" aria-hidden="true"><path d="M10 30v8h28v-8M24 8v22M15 17l9-9 9 9"/></svg>
+              <p class="drop-title">Drop a <b>.zip</b> or a folder here</p>
+              <p class="drop-or">or
+                <label class="pick">choose a zip<input id="pick-zip" type="file" accept=".zip,application/zip" hidden></label>
+                <span aria-hidden="true">·</span>
+                <label class="pick">choose a folder<input id="pick-dir" type="file" webkitdirectory multiple hidden></label></p>
+              <p class="drop-note" id="drop-note"><span class="lock-ic" aria-hidden="true"></span> Sealed with a key only this browser holds — Justify keeps no copy it can read. Your code is deleted the moment the audit ends.</p>
+            </div>
+            <p id="upload-error" class="field-error" role="alert" hidden></p>
+            <div class="signin-needed" id="upload-signin" hidden>
+              <p>Your own code is audited privately, inside your account. Sign in first — it takes ten seconds.</p>
+              <a class="btn-primary" id="upload-signin-link" href="/signin">Sign in to audit your code</a>
+            </div>
+          </form>
+          <p class="allowance" id="allowance"></p>
         </div>
 
-        <form id="scan-form" class="scan-form" role="tabpanel" aria-labelledby="tab-repo" novalidate>
-          <label for="repo" class="sr-only">Public GitHub repository</label>
-          <div class="field">
-            <span class="field-prefix" aria-hidden="true">github.com/</span>
-            <input id="repo" name="repo" type="text" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false"
-                   placeholder="owner/repository" aria-describedby="repo-hint repo-error" required>
-            <button id="scan-btn" type="submit">Audit it</button>
-          </div>
-          <p id="repo-error" class="field-error" role="alert" hidden></p>
-          <p id="repo-hint" class="hint">Try
-            <button type="button" class="example" data-repo="PrefectHQ/fastmcp">PrefectHQ/fastmcp</button>
-            <button type="button" class="example" data-repo="judeper/FSI-CopilotGov">judeper/FSI-CopilotGov</button>
-            <button type="button" class="example" data-repo="Azure/azure-functions-agents-runtime">Azure/azure-functions-agents-runtime</button></p>
-        </form>
-
-        <form id="upload-form" class="scan-form upload-form" role="tabpanel" aria-labelledby="tab-upload" hidden novalidate>
-          <div class="drop" id="drop" tabindex="0" aria-describedby="drop-note">
-            <svg class="drop-art" viewBox="0 0 48 48" aria-hidden="true"><path d="M10 30v8h28v-8M24 8v22M15 17l9-9 9 9"/></svg>
-            <p class="drop-title">Drop a <b>.zip</b> or a folder here</p>
-            <p class="drop-or">or
-              <label class="pick">choose a zip<input id="pick-zip" type="file" accept=".zip,application/zip" hidden></label>
-              <span aria-hidden="true">·</span>
-              <label class="pick">choose a folder<input id="pick-dir" type="file" webkitdirectory multiple hidden></label></p>
-            <p class="drop-note" id="drop-note">Private to your account, deleted from the server after the audit. Include the <code>.git</code> folder in the zip to get authorship.</p>
-          </div>
-          <p id="upload-error" class="field-error" role="alert" hidden></p>
-          <div class="signin-needed" id="upload-signin" hidden>
-            <p>Your own code stays private to your account, so this needs you signed in.</p>
-            <a class="btn-primary" id="upload-signin-link" href="/signin">Sign in to audit your code</a>
-          </div>
-        </form>
-
-        <p class="allowance" id="allowance"></p>
         <ul class="trust" aria-label="What the audit does">
-          <li>Any public GitHub repository</li>
-          <li>Your own code, private to you</li>
-          <li>Read-only — never runs your code</li>
-          <li>Open source, MIT</li>
+          <li>Any public repository</li>
+          <li>Private code, sealed</li>
+          <li>Never runs your code</li>
+          <li>Open source · MIT</li>
         </ul>
       </div>
 
       <figure class="hero-art" id="hero-art">
-        <div class="city-frame hero-city" id="hero-city">
-          <div class="city-loading" id="hero-loading" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+        <div class="window">
+          <div class="window-bar" aria-hidden="true">
+            <span class="dots"><i></i><i></i><i></i></span>
+            <span class="window-url">justify.xeta.in/s/fastmcp</span>
+            <span class="window-live"><span class="live-dot"></span>Live audit</span>
+          </div>
+          <div class="city-frame hero-city" id="hero-city">
+            <div class="city-loading" id="hero-loading" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+          </div>
+          <div class="float-card" aria-hidden="true">
+            <span class="fc-label">PrefectHQ/fastmcp</span>
+            <span class="fc-num">99.99<small>%</small></span>
+            <span class="fc-sub">Justified Line Ratio · 250,830 lines · 40 s</span>
+          </div>
         </div>
         <figcaption class="hero-caption" id="hero-caption">
-          <span class="cap-title">A real audit, as a city</span>
-          <span class="cap-text" id="hero-cap-text">One tower per file of PrefectHQ/fastmcp. Gold floors are copied code, coral is dead weight, violet came from AI-signed commits. Drag to look around.</span>
+          <span class="cap-text" id="hero-cap-text">One tower per file. Gold floors are copied code, coral is dead weight, violet came from AI-signed commits. Drag to look around.</span>
           <span class="legend city-legend"><span><i class="sw body"></i>No AI trace</span><span><i class="sw ai"></i>AI-signed</span><span><i class="sw dup"></i>Copied</span><span><i class="sw dead"></i>Dead weight</span></span>
         </figcaption>
       </figure>
     </div>
+
+    <div class="wrap works-with" aria-label="Works with">
+      <span class="ww-label">Called live from</span>
+      <span class="ww-name">ChatGPT</span><span class="ww-name">GitHub Copilot</span><span class="ww-name">Claude Code</span>
+      <span class="ww-sep" aria-hidden="true"></span>
+      <span class="ww-label">Connects to</span>
+      <span class="ww-name">Claude</span><span class="ww-name">Cursor</span><span class="ww-name">Gemini CLI</span><span class="ww-name">Copilot Studio</span>
+    </div>
   </section>
 
+  <!-- ============================================================ your repositories (signed in) -->
+  <section class="repos" id="repos-wrap" hidden aria-labelledby="repos-title">
+    <div class="wrap">
+      <div class="section-head-row">
+        <div>
+          <p class="eyebrow">Your repositories</p>
+          <h2 id="repos-title" class="section-title small">Pick one. Audit it in seconds.</h2>
+        </div>
+        <form class="repos-owner" id="repos-owner" novalidate>
+          <label for="repos-owner-input" class="sr-only">GitHub user or organisation</label>
+          <input id="repos-owner-input" type="text" placeholder="GitHub user or organisation" autocomplete="off" autocapitalize="off" spellcheck="false">
+          <button type="submit" class="btn-ghost">Show</button>
+        </form>
+      </div>
+      <div class="repos-bar">
+        <input id="repos-filter" type="search" placeholder="Filter repositories" autocomplete="off" aria-label="Filter repositories">
+        <div class="repos-actions" id="repos-actions"></div>
+      </div>
+      <ul class="repo-grid" id="repo-grid"></ul>
+      <p class="meta" id="repos-note"></p>
+    </div>
+  </section>
+
+  <!-- ============================================================ a scan in progress -->
   <section id="scan" class="scan" hidden aria-live="polite">
     <div class="wrap">
-      <div class="scan-head">
-        <div>
-          <p class="eyebrow" id="scan-eyebrow">Auditing</p>
-          <h2 id="scan-repo" class="repo-name"></h2>
-          <p id="scan-meta" class="meta"></p>
+      <div class="scan-card">
+        <div class="scan-head">
+          <div>
+            <p class="eyebrow" id="scan-eyebrow">Auditing</p>
+            <h2 id="scan-repo" class="repo-name"></h2>
+            <p id="scan-meta" class="meta"></p>
+          </div>
+          <p id="scan-clock" class="clock" aria-hidden="true"></p>
         </div>
-        <p id="scan-clock" class="clock" aria-hidden="true"></p>
-      </div>
-      <ol class="rail" id="rail" aria-label="Audit stages">
-        <li data-stage="clone"><span class="dot"></span><span class="rail-name">Fetch</span><span class="rail-note">history included</span></li>
-        <li data-stage="ingest"><span class="dot"></span><span class="rail-name">Read</span><span class="rail-note">every file</span></li>
-        <li data-stage="facts"><span class="dot"></span><span class="rail-name">Map</span><span class="rail-note">who uses what</span></li>
-        <li data-stage="candidates"><span class="dot"></span><span class="rail-name">Question</span><span class="rail-note">what needs a reason</span></li>
-        <li data-stage="copies"><span class="dot"></span><span class="rail-name">Compare</span><span class="rail-note">copies, any language</span></li>
-        <li data-stage="attribution"><span class="dot"></span><span class="rail-name">Attribute</span><span class="rail-note">AI-signed or not</span></li>
-        <li data-stage="metrics"><span class="dot"></span><span class="rail-name">Score</span><span class="rail-note">the payoff</span></li>
-        <li data-stage="local" class="local"><span class="dot"></span><span class="rail-name">Judge &amp; prove</span><span class="rail-note">on your machine</span></li>
-      </ol>
-      <p id="scan-status" class="status"></p>
-      <div id="scan-failed" class="notice notice-bad" hidden>
-        <h3 id="fail-title">The audit could not finish</h3>
-        <p id="fail-text"></p>
-        <p id="fail-local" hidden>For a repository this large, run Justify on your own machine — see <a href="#local">install locally</a>.</p>
-        <p id="fail-signin" hidden><a class="btn-primary" href="/signin">Sign in for more audits a day</a></p>
+        <ol class="rail" id="rail" aria-label="Audit stages">
+          <li data-stage="clone"><span class="dot"></span><span class="rail-name">Fetch</span><span class="rail-note">history included</span></li>
+          <li data-stage="ingest"><span class="dot"></span><span class="rail-name">Read</span><span class="rail-note">every file</span></li>
+          <li data-stage="facts"><span class="dot"></span><span class="rail-name">Map</span><span class="rail-note">who uses what</span></li>
+          <li data-stage="candidates"><span class="dot"></span><span class="rail-name">Question</span><span class="rail-note">what needs a reason</span></li>
+          <li data-stage="copies"><span class="dot"></span><span class="rail-name">Compare</span><span class="rail-note">copies, any language</span></li>
+          <li data-stage="attribution"><span class="dot"></span><span class="rail-name">Attribute</span><span class="rail-note">AI-signed or not</span></li>
+          <li data-stage="metrics"><span class="dot"></span><span class="rail-name">Score</span><span class="rail-note">the payoff</span></li>
+          <li data-stage="local" class="local"><span class="dot"></span><span class="rail-name">Judge &amp; prove</span><span class="rail-note">on your machine</span></li>
+        </ol>
+        <p id="scan-status" class="status"></p>
+        <div id="scan-failed" class="notice notice-bad" hidden>
+          <h3 id="fail-title">The audit could not finish</h3>
+          <p id="fail-text"></p>
+          <p id="fail-local" hidden>For a repository this large, run Justify on your own machine — see <a href="#local">install locally</a>.</p>
+          <p id="fail-signin" hidden><a class="btn-primary" href="/signin">Sign in for more audits a day</a></p>
+        </div>
       </div>
     </div>
   </section>
 
+  <!-- ============================================================ the statement -->
   <section id="result" class="result" hidden aria-labelledby="result-title">
     <div class="wrap">
       <div class="statement">
         <div class="statement-head">
           <div>
-            <p class="eyebrow"><span id="result-kind">Audit statement</span> <span class="badge-private" id="private-badge" hidden>Private to you</span></p>
+            <p class="eyebrow"><span id="result-kind">Audit statement</span> <span class="badge-private" id="private-badge" hidden>Sealed · only you can read this</span></p>
             <h2 id="result-title" class="repo-name"></h2>
             <p id="result-meta" class="meta"></p>
           </div>
           <div class="actions">
-            <button type="button" id="copy-plan" class="ghost">Copy fix plan for your AI</button>
-            <button type="button" id="copy-link" class="ghost">Copy link</button>
-            <a id="download-md" class="ghost" download>Download .md</a>
+            <button type="button" id="copy-plan" class="btn-primary small">Copy fix plan for your AI</button>
+            <button type="button" id="copy-link" class="btn-ghost small">Copy link</button>
+            <a id="download-md" class="btn-ghost small" download>Download .md</a>
+            <button type="button" id="save-key" class="btn-ghost small" hidden>Save the key</button>
           </div>
         </div>
 
-        <div class="balance">
+        <div class="sealed-box" id="sealed-box" hidden>
+          <span class="sealed-ic" aria-hidden="true"></span>
+          <div>
+            <h3>This audit is sealed</h3>
+            <p>It was locked with a key kept only in the browser where it was started. Justify stores it encrypted and cannot open it. Open this page in that browser, or paste the key you saved.</p>
+            <form class="sealed-form" id="sealed-form" novalidate>
+              <label for="sealed-key" class="sr-only">Key</label>
+              <input id="sealed-key" type="text" placeholder="Paste the key" autocomplete="off" spellcheck="false">
+              <button type="submit" class="btn-primary small">Open</button>
+            </form>
+            <p class="field-error" id="sealed-error" role="alert" hidden></p>
+          </div>
+        </div>
+
+        <div class="balance" id="balance">
           <div class="jlr" id="jlr-box">
             <p class="jlr-label">Justified Line Ratio</p>
             <p class="jlr-value"><span id="jlr"></span><span class="pct">%</span></p>
@@ -252,79 +318,115 @@
     </div>
   </section>
 
-  <section id="finds" class="finds band" aria-labelledby="finds-title">
+  <!-- ============================================================ numbers -->
+  <section class="numbers" aria-label="Measured">
+    <div class="wrap numbers-grid">
+      <div class="num"><b>1,013,192</b><span>lines of AI-assisted Python measured in five public repositories</span></div>
+      <div class="num"><b>40 s</b><span>to audit fastmcp live — 250,830 lines and 4,051 commits</span></div>
+      <div class="num"><b>6</b><span>AI models from four makers vote on every removal</span></div>
+      <div class="num"><b>0</b><span>storage or AI keys — storage, the jury and Microsoft sign-in use Entra identities</span></div>
+    </div>
+  </section>
+
+  <!-- ============================================================ product -->
+  <section id="product" class="product" aria-labelledby="product-title">
     <div class="wrap">
-      <p class="eyebrow">What it finds</p>
-      <h2 id="finds-title" class="section-title">Four kinds of weight. Every one passes every test.</h2>
-      <p class="section-lede">Dead weight never breaks anything — that is why it survives. An assistant writes for the prompt in front of it, not for the codebase it cannot see, so it leaves these behind:</p>
-      <div class="kinds">
-        <article class="kind">
-          <svg class="spot" viewBox="0 0 64 64" aria-hidden="true"><rect x="6" y="18" width="24" height="28" rx="4" class="s-line"/><path d="M14 27h8M14 33h8M14 39h5" class="s-line"/><path d="M30 32h10" class="s-line"/><path d="M42 32h14" class="s-dash"/><circle cx="58" cy="32" r="3" class="s-dead"/></svg>
-          <h3>Unused imports</h3>
-          <p>A module loaded that nothing calls. Every one is read, parsed and loaded on every run.</p>
-          <pre class="snip"><code><span class="k">import</span> io          <span class="c"># nothing uses it</span></code></pre>
-          <p class="kind-lang">Python</p>
+      <p class="eyebrow">The product</p>
+      <h2 id="product-title" class="section-title">Everything an audit should say. Nothing it should keep.</h2>
+      <p class="section-lede">Dead weight never breaks anything — that is why it survives. An assistant writes for the prompt in front of it, not for the codebase it cannot see. Justify reads the whole codebase.</p>
+      <div class="bento">
+        <article class="tile tile-wide">
+          <div class="tile-copy">
+            <p class="tile-kicker">Four kinds of weight</p>
+            <h3>Unused imports, functions, classes and dependencies — and copied code.</h3>
+            <p>Python gets the full audit. JavaScript, TypeScript, Go, Java, C, C++, C#, Rust and 20 more are checked for copied blocks. Every repository gets a census and authorship.</p>
+          </div>
+          <div class="tile-art code-art" aria-hidden="true">
+            <div class="ca-line"><span class="k">import</span> io <span class="tag tag-remove">REMOVE</span></div>
+            <div class="ca-line"><span class="k">def</span> clock_time(): <span class="tag tag-remove">REMOVE</span></div>
+            <div class="ca-line"><span class="k">function</span> total(items) <span class="tag tag-copy">COPY</span></div>
+            <div class="ca-line dim"><span class="k">def</span> format_date(d): <span class="tag tag-keep">KEEP</span></div>
+            <div class="ca-line"><span class="dep">leftpad==1.0</span> <span class="tag tag-remove">REMOVE</span></div>
+          </div>
         </article>
-        <article class="kind">
-          <svg class="spot" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="14" class="s-dash"/><text x="32" y="37" class="s-text">f()</text><path d="M8 14l8 8M56 14l-8 8M8 50l8-8M56 50l-8-8" class="s-faint"/></svg>
-          <h3>Unused functions &amp; classes</h3>
-          <p>A helper with no callers anywhere in the repository — kept alive only because nobody checked.</p>
-          <pre class="snip"><code><span class="k">def</span> clock_time():   <span class="c"># 0 callers</span></code></pre>
-          <p class="kind-lang">Python</p>
+        <article class="tile">
+          <p class="tile-kicker">Who wrote it</p>
+          <h3>Names the assistant.</h3>
+          <p>Nineteen assistants recognised by the signatures they leave. Pasted code carries none — it is “no AI trace”, never “human”.</p>
+          <div class="chips" aria-hidden="true"><span>Claude 370</span><span>Codex 66</span><span>Copilot 32</span><span>Cursor 2</span></div>
+          <p class="tile-foot">Commits in PrefectHQ/fastmcp</p>
         </article>
-        <article class="kind">
-          <svg class="spot" viewBox="0 0 64 64" aria-hidden="true"><rect x="8" y="12" width="26" height="34" rx="4" class="s-line"/><rect x="30" y="20" width="26" height="34" rx="4" class="s-dup"/><path d="M15 22h12M15 28h12M15 34h8M37 30h12M37 36h12M37 42h8" class="s-line"/></svg>
-          <h3>Copied code</h3>
-          <p>The same job written twice, because the assistant could not see the first one. Found in Python and in more than 25 other languages.</p>
-          <pre class="snip"><code><span class="k">function</span> total(items) <span class="c">≡ src/cart.ts:12</span></code></pre>
-          <p class="kind-lang">Every language</p>
+        <article class="tile">
+          <p class="tile-kicker">For your AI</p>
+          <h3>A fix plan, file by file.</h3>
+          <p>One button, or one MCP call: the assistant gets exactly which lines to change and why — and you approve each change.</p>
+          <pre class="mini-code" aria-hidden="true">## core/teams.py
+- Delete import `io` (line 40)
+## core/clock.py
+- Delete `clock_time` (51–53)</pre>
         </article>
-        <article class="kind">
-          <svg class="spot" viewBox="0 0 64 64" aria-hidden="true"><path d="M32 8l20 11v24L32 54 12 43V19z" class="s-line"/><path d="M12 19l20 11 20-11M32 30v24" class="s-line"/><path d="M50 50l8 8" class="s-dead-line"/></svg>
-          <h3>Unused dependencies</h3>
-          <p>A package installed that no file imports — one more thing to download, patch and audit.</p>
-          <pre class="snip"><code>leftpad==1.0     <span class="c"># no file imports it</span></code></pre>
-          <p class="kind-lang">Python</p>
+        <article class="tile">
+          <p class="tile-kicker">Private by design</p>
+          <h3>Sealed so only you can read it.</h3>
+          <p>Your code is deleted when the audit ends. The result is encrypted with a key that stays in your browser. We keep no copy we can open.</p>
+          <div class="seal-art" aria-hidden="true"><span class="seal-lock"></span><span class="seal-bytes">9f 3a c1 7e 04 b2 …</span></div>
+        </article>
+        <article class="tile">
+          <p class="tile-kicker">Over time</p>
+          <h3>What got fixed since last time.</h3>
+          <p>A dashboard tracks every repository: the ratio, the trend, and exactly which findings were fixed or are new.</p>
+          <div class="delta-art" aria-hidden="true"><span>99.07%</span><span class="arrow">→</span><span class="good">99.94%</span></div>
+          <p class="tile-foot">Our own repository, after the 11 removals its tests proved</p>
+        </article>
+        <article class="tile tile-full">
+          <div class="tile-copy">
+            <p class="tile-kicker">The jury · on your machine</p>
+            <h3>Six models argue every doubtful removal. Your tests have the last word.</h3>
+            <p>GPT-5.6 Sol, gpt-oss, Phi-4, Phi-4-reasoning and Llama on Azure AI Foundry, and Claude Opus 5.5 — each must cite the line that justifies its vote. Doubt always means keep.</p>
+          </div>
+          <div class="bars-art" aria-hidden="true"><i></i><i></i><i></i><i></i><i class="short"></i><i class="short"></i></div>
         </article>
       </div>
     </div>
   </section>
 
+  <!-- ============================================================ how -->
   <section id="how" class="how" aria-labelledby="how-title">
     <div class="wrap">
       <p class="eyebrow">How it works</p>
       <h2 id="how-title" class="section-title">Seven stages. The model never deletes.</h2>
-      <p class="section-lede">A code graph proposes, a jury of models is asked why, a second call tries to prove it wrong, the tests decide, and a person approves. Doubt always means keep.</p>
+      <p class="section-lede">A code graph proposes, a jury of models is asked why, a second call tries to prove it wrong, the tests decide, and a person approves.</p>
       <ol class="pipeline">
         <li><span class="pn">1</span><b>Ingest</b><span>Every file read once and fingerprinted; every language counted.</span></li>
         <li><span class="pn">2</span><b>Static facts</b><span>Syntax trees, not text search: who uses what, across the whole repository.</span></li>
-        <li><span class="pn">3</span><b>Candidates</b><span>Frameworks, dynamic lookups and re-exports are held back for judgement. Copies found in every language.</span></li>
-        <li class="model"><span class="pn">4</span><b>Justify</b><span>A jury of models is asked why the unit exists, and must cite a file and line that is then checked.</span></li>
-        <li class="model"><span class="pn">5</span><b>Challenge</b><span>A second call tries to prove the code is needed. If it can, the code stays.</span></li>
+        <li><span class="pn">3</span><b>Candidates</b><span>Frameworks, dynamic lookups and re-exports held back. Copies found in every language.</span></li>
+        <li class="model"><span class="pn">4</span><b>Justify</b><span>A jury of models is asked why the unit exists, and must cite a file and line that is checked.</span></li>
+        <li class="model"><span class="pn">5</span><b>Challenge</b><span>The strongest model tries to prove the code is needed. If it can, the code stays.</span></li>
         <li class="proof"><span class="pn">6</span><b>Proof</b><span>Removed in a temporary copy; your tests run. A file the tests never load is “not provable”.</span></li>
-        <li><span class="pn">7</span><b>Report</b><span>A reason on every line, a fix plan for your AI, a ledger of every run. A person approves.</span></li>
+        <li><span class="pn">7</span><b>Report</b><span>A reason on every line, a fix plan for your AI, a ledger of every run.</span></li>
       </ol>
       <div class="where">
-        <p><span class="tag tag-site">This site</span> stages 1–3, authorship and the score — public repositories and your own uploads, read-only.</p>
+        <p><span class="tag tag-site">This site</span> stages 1–3, authorship and the score — public repositories and your own code, read-only.</p>
         <p><span class="tag tag-local">Your machine</span> stages 4–6 — the jury, your tests, the proof.</p>
       </div>
     </div>
   </section>
 
-  <section id="jury" class="jury band" aria-labelledby="jury-title">
+  <!-- ============================================================ jury -->
+  <section id="jury" class="jury" aria-labelledby="jury-title">
     <div class="wrap jury-grid">
       <div>
         <p class="eyebrow">The Justify Jury · Azure AI Foundry + Claude</p>
         <h2 id="jury-title" class="section-title">Six models from four makers vote. The tests grade them.</h2>
-        <p class="section-lede">One model's opinion is a guess. Justify asks a jury — and then checks every juror against what the project's own tests say really happened.</p>
+        <p class="section-lede">One model's opinion is a guess. Justify asks a jury — and checks every juror against what the project's own tests say really happened.</p>
         <ul class="rules">
           <li><b>Removing needs near-unanimity.</b> Every juror but one must vote remove, each at 0.7 confidence or more.</li>
-          <li><b>One real reason vetoes.</b> A keep that cites a file and line where the code is actually used stops the removal.</li>
+          <li><b>One real reason vetoes.</b> A keep that cites a file and line where the code is used stops the removal.</li>
           <li><b>A split goes to a person.</b> Anything the jury cannot settle is kept and flagged.</li>
-          <li><b>No keys anywhere.</b> Foundry jurors answer to an Entra sign-in, Claude Opus 5.5 to the Claude Code sign-in — never an API key.</li>
+          <li><b>No keys anywhere.</b> Foundry jurors answer to an Entra sign-in, Claude Opus 5.5 to the Claude Code sign-in.</li>
         </ul>
       </div>
-      <figure class="chart scoreboard" aria-labelledby="board-cap">
+      <figure class="panel scoreboard" aria-labelledby="board-cap">
         <figcaption id="board-cap">Votes the tests proved right</figcaption>
         <p class="meta">13 units of one repository, every removal run against its own tests · 84 model calls · 3 Oct 2026</p>
         <div id="board" class="bars"></div>
@@ -333,12 +435,13 @@
     </div>
   </section>
 
+  <!-- ============================================================ data -->
   <section id="data" class="data" aria-labelledby="data-title">
     <div class="wrap data-grid">
       <div>
         <p class="eyebrow">What we measured</p>
         <h2 id="data-title" class="section-title">Does it pay off? It depends on the repository.</h2>
-        <p class="section-lede">We ran Justify on five public repositories with AI-signed commits — 3,434 Python files, 1,013,192 lines, at each one's latest commit on 3 October — and split every finding by who wrote it.</p>
+        <p class="section-lede">Five public repositories with AI-signed commits — 3,434 Python files, 1,013,192 lines, each at its latest commit on 3 October — every finding split by who wrote it.</p>
         <ol class="takeaways">
           <li><b>Unused code is not where AI-assisted code costs.</b> AI-signed code carried no more of it in all five.</li>
           <li><b>Duplication is.</b> Higher in three of five — 7.2× the rate of the rest in the largest repository.</li>
@@ -346,7 +449,7 @@
         </ol>
         <p class="caveat">Static stages and authorship, no proof. AI-signed = commits with an assistant signature, a lower bound. The first run, on 2 October, gave the same three findings.</p>
       </div>
-      <figure class="chart" aria-labelledby="chart-cap">
+      <figure class="panel chart" aria-labelledby="chart-cap">
         <figcaption id="chart-cap">Duplicate code per 1,000 lines</figcaption>
         <div class="chart-legend"><span><i class="sw ai"></i>AI-signed</span><span><i class="sw human"></i>No AI trace</span></div>
         <div id="dup-chart" class="bars"></div>
@@ -355,13 +458,38 @@
     </div>
   </section>
 
-  <section id="connect" class="connect band" aria-labelledby="connect-title">
+  <!-- ============================================================ privacy -->
+  <section id="privacy" class="privacy" aria-labelledby="privacy-title">
+    <div class="wrap">
+      <p class="eyebrow">Privacy</p>
+      <h2 id="privacy-title" class="section-title">What Justify can see — and what it cannot.</h2>
+      <p class="section-lede">To audit code, the service has to read it for the few seconds the audit runs. After that, this is everything it keeps, and who can read it.</p>
+      <div class="table-wrap">
+        <table class="data-map">
+          <thead><tr><th scope="col">What</th><th scope="col">Kept where</th><th scope="col">Who can read it</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Code you upload or share with an AI app</th><td>Nowhere — deleted the moment the audit ends</td><td><span class="who-none">Nobody</span></td></tr>
+            <tr><th scope="row">The result of a private audit</th><td>Encrypted with AES-256-GCM; the key never leaves your browser or AI app</td><td><span class="who-you">Only you</span> — not even Justify</td></tr>
+            <tr><th scope="row">Audits of public repositories</th><td>Cached by commit</td><td>Anyone with the link — it is public code</td></tr>
+            <tr><th scope="row">Your history and dashboard numbers</th><td>Our database: repository names, counts and ratios — never code or file names</td><td>You, and the service that shows it to you</td></tr>
+            <tr><th scope="row">Your account</th><td>A display name; a GitHub username and picture. No email, no password, no GitHub key</td><td>You, and the service</td></tr>
+            <tr><th scope="row">Your network address</th><td>Never stored — the free daily allowance is counted under a keyed hash whose key lives only in memory</td><td><span class="who-none">Nobody</span></td></tr>
+            <tr><th scope="row">Sessions and tokens</th><td>Only their SHA-256 fingerprints</td><td><span class="who-none">Nobody can recover them</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="caveat">No code is ever sent to a model by this site. Storage and Microsoft sign-in use the service's own Entra identity, so there is no storage key to leak; the jury reaches Azure AI Foundry with an Entra sign-in, not a key. Everything here is open source: <a href="https://github.com/BPSKartik/justify">read exactly what it does</a>, or the full <a href="/privacy">privacy page</a>.</p>
+    </div>
+  </section>
+
+  <!-- ============================================================ connect -->
+  <section id="connect" class="connect" aria-labelledby="connect-title">
     <div class="wrap connect-grid">
       <div>
         <p class="eyebrow">Model Context Protocol</p>
         <h2 id="connect-title" class="section-title">Let your AI assistant check its own work.</h2>
         <p class="section-lede" id="connect-lede">The assistant that writes the code can call Justify before it hands the code over — and gets back a fix plan, file by file.</p>
-        <div class="endpoint"><code id="endpoint"></code><button type="button" class="ghost copy" data-copy-target="endpoint">Copy</button></div>
+        <div class="endpoint"><code id="endpoint"></code><button type="button" class="btn-ghost small copy" data-copy-target="endpoint">Copy</button></div>
         <p class="meta" id="connect-auth"></p>
       </div>
       <figure class="hub" aria-hidden="true">
@@ -388,42 +516,47 @@
 
       <div class="local" id="local">
         <div>
-          <h3>The jury, and proof</h3>
-          <p>The hosted audit reads code and never runs anything. To let the jury judge, and to <b>prove</b> each removal by running your own tests on a temporary copy, run Justify on your machine:</p>
+          <h3>The jury, and proof — on your machine</h3>
+          <p>The hosted audit reads code and never runs anything. To let the jury judge, and to <b>prove</b> each removal by running your own tests on a temporary copy, run Justify locally:</p>
         </div>
-        <pre class="code"><code id="local-install">pip install "justify-code[mcp] @ git+https://github.com/BPSKartik/justify"</code><button type="button" class="ghost copy" data-copy-target="local-install">Copy</button></pre>
-        <pre class="code"><code id="local-run">justify scan . --judge --prove "python -m pytest -q"</code><button type="button" class="ghost copy" data-copy-target="local-run">Copy</button></pre>
+        <pre class="code"><code id="local-install">pip install "justify-code[mcp] @ git+https://github.com/BPSKartik/justify"</code><button type="button" class="btn-ghost small copy" data-copy-target="local-install">Copy</button></pre>
+        <pre class="code"><code id="local-run">justify scan . --judge --prove "python -m pytest -q"</code><button type="button" class="btn-ghost small copy" data-copy-target="local-run">Copy</button></pre>
         <p class="meta">As a local MCP server: command <code>justify-mcp</code>, with <code>JUSTIFY_TEST_COMMAND</code> (the only command it may run) and <code>JUSTIFY_ALLOWED_ROOTS</code> (the only folders it may read).</p>
       </div>
     </div>
   </section>
 
+  <!-- ============================================================ faq -->
   <section id="faq" class="faq" aria-labelledby="faq-title">
     <div class="wrap faq-grid">
       <div>
         <p class="eyebrow">Questions</p>
         <h2 id="faq-title" class="section-title">Before you trust it.</h2>
-        <svg class="faq-art" viewBox="0 0 220 160" aria-hidden="true">
-          <rect x="20" y="24" width="120" height="112" rx="10" class="fa-paper"/>
-          <path d="M40 52h80M40 70h64M40 88h76M40 106h52" class="fa-line"/>
-          <path d="M40 70h64" class="fa-strike"/>
-          <g transform="rotate(-8 168 92)"><rect x="128" y="74" width="80" height="34" rx="4" class="fa-stamp"/><text x="168" y="96" class="fa-stamp-text">PROVED</text></g>
-        </svg>
+        <p class="section-lede">Straight answers — including the ones that limit what we can claim.</p>
       </div>
       <div class="qa">
         <details open><summary>Does Justify ever delete my code?</summary>
           <p>No. It proposes. On your machine it removes code only in a temporary copy, runs your tests there, and writes a report. A person approves every change. The model can veto a removal; it can never force one.</p></details>
-        <details><summary>What happens to code I upload?</summary>
-          <p>It is unpacked on the server, audited, and deleted when the audit finishes. The result — names, files and line numbers, never your code — is visible only to your account, and you can delete it from your dashboard at any time. Nothing is ever sent to a model.</p></details>
+        <details><summary>Who can see the code I upload?</summary>
+          <p>Nobody after the audit. It is unpacked, audited and deleted when the audit ends. The result is sealed with a key made in your browser — Justify stores only ciphertext it cannot open. Save the key if you want to open the audit on another device.</p></details>
         <details><summary>How does it know which code an AI wrote?</summary>
-          <p>From signatures the assistants leave in commits: trailers like <code>Co-Authored-By: Claude</code>, lines like “Generated with Codex”, and the accounts agents commit as (Copilot coding agent, Devin, Jules, Cursor Agent). Code pasted from a chat window carries no signature — no tool can reliably tell it apart, and guessing would wrongly accuse people — so Justify reports it as “no AI trace”, never as human.</p></details>
+          <p>From signatures the assistants leave in commits: trailers like <code>Co-Authored-By: Claude</code>, lines like “Generated with Codex”, and the accounts agents commit as. Code pasted from a chat window carries no signature — no tool can reliably tell it apart, and guessing would wrongly accuse people — so Justify reports it as “no AI trace”, never as human.</p></details>
         <details><summary>What is the Justified Line Ratio?</summary>
-          <p>The share of lines that are not dead weight: lines left after removing everything with no use anywhere, divided by all lines. A team can track it per repository, per quarter, and split by authorship — the dashboard does.</p></details>
+          <p>The share of lines that are not dead weight: lines left after removing everything with no use anywhere, divided by all lines. The dashboard tracks it per repository, over time, split by authorship.</p></details>
         <details><summary>Which languages?</summary>
-          <p>Python gets the full audit: unused imports, functions, classes and dependencies, copies, the jury and proof. More than 25 other languages — JavaScript, TypeScript, Go, Java, C, C++, C#, Rust and more — are checked for copied code and counted, and every repository gets authorship.</p></details>
+          <p>Python gets the full audit: unused imports, functions, classes and dependencies, copies, the jury and proof. More than 25 other languages are checked for copied code and counted, and every repository gets authorship.</p></details>
         <details><summary>How is this different from a linter?</summary>
           <p>A linter looks at one file and asks whether a name is used. Justify looks at the whole repository, asks whether the code is <i>worth keeping</i>, explains why with a file and line, proves removals with your tests, and splits the result by who wrote it.</p></details>
       </div>
+    </div>
+  </section>
+
+  <section class="cta" aria-labelledby="cta-title">
+    <div class="wrap cta-box">
+      <svg class="cta-mark" viewBox="0 0 64 64" aria-hidden="true"><use href="#mark"/></svg>
+      <h2 id="cta-title">Find out what your codebase is carrying.</h2>
+      <p>Paste a repository, or sign in and pick one of yours.</p>
+      <a class="btn-primary" href="#top">Audit a repository</a>
     </div>
   </section>
 </main>
@@ -431,7 +564,7 @@
 <footer class="foot">
   <div class="wrap foot-grid">
     <div class="foot-brand">
-      <svg class="mark" aria-hidden="true"><use href="#mark"/></svg>
+      <svg class="mark" viewBox="0 0 64 64" aria-hidden="true"><use href="#mark"/></svg>
       <div><b>Justify</b><span>Every line earns its place.</span></div>
     </div>
     <ul class="foot-links">

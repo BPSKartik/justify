@@ -23,6 +23,7 @@ import html
 import json
 import os
 import pathlib
+import secrets
 import threading
 import time
 from urllib.parse import parse_qs, quote, urlparse
@@ -41,10 +42,12 @@ from .. import __version__
 from .accounts import Accounts, QuotaExceeded
 from .db import Database
 from .fetch import FetchError, parse
+from .ghapp import AppError, app_from_env
 from .jobs import Jobs
 from .login import LoginError, LoginFlow, providers_from_env, safe_next
 from .mcp_hosted import build
 from .ratelimit import RateLimiter, client_ip
+from .seal import parse_key
 from .storage import Results, Snapshots, blob_from_env
 from .uploads import clean_name, unpack_files, unpack_zip
 
@@ -53,8 +56,9 @@ SESSION_COOKIE = "jfy_session"
 STATE_COOKIE = "jfy_login"
 
 CSP = ("default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; "
-       "font-src https://fonts.gstatic.com; img-src 'self' data: https://avatars.githubusercontent.com; "
-       "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; worker-src 'self'")
+       "font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://avatars.githubusercontent.com; "
+       "connect-src 'self' https://api.github.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; "
+       "worker-src 'self'")
 
 
 def _env_int(name: str, default: int) -> int:
@@ -95,7 +99,7 @@ def _consent_page(client: dict, user: dict, req_id: str, csrf: str, redirect_uri
     who = html.escape(user.get("login") or user.get("name") or "you")
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect {name} to Justify</title>
-<link rel="icon" href="/static/favicon.svg"><link rel="stylesheet" href="/static/styles.css"></head>
+<link rel="icon" href="/static/favicon.svg"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500;600&display=swap"><link rel="stylesheet" href="/static/styles.css"></head>
 <body class="plain"><main class="consent">
 <img class="consent-mark" src="/static/favicon.svg" alt="" width="44" height="44">
 <h1><strong>{name}</strong> wants to use Justify as <strong>{who}</strong></h1>
@@ -116,12 +120,12 @@ You can disconnect it at any time from your dashboard.</p>
 def _message_page(title: str, body: str, status: int = 400) -> HTMLResponse:
     return HTMLResponse(f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>{html.escape(title)}</title>
-<link rel="icon" href="/static/favicon.svg"><link rel="stylesheet" href="/static/styles.css"></head>
+<link rel="icon" href="/static/favicon.svg"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500;600&display=swap"><link rel="stylesheet" href="/static/styles.css"></head>
 <body class="plain"><main class="consent"><h1>{html.escape(title)}</h1><p>{html.escape(body)}</p>
 <p><a class="btn-ghost" href="/">Back to Justify</a></p></main></body></html>""", status_code=status)
 
 
-def create_app(jobs: Jobs | None = None) -> Starlette:
+def create_app(jobs: Jobs | None = None, ghapp=None) -> Starlette:
     data_dir = os.environ.get("JUSTIFY_DATA_DIR") or "/tmp/justify-hosted"
     base_url = (os.environ.get("JUSTIFY_PUBLIC_URL") or "http://localhost:8000").rstrip("/")
     secure_cookies = base_url.startswith("https://")
@@ -145,6 +149,10 @@ def create_app(jobs: Jobs | None = None) -> Starlette:
     accounts = Accounts(database)
     burst = RateLimiter(_env_int("JUSTIFY_RATE_PER_HOUR", 60))     # any address, signed in or not
     providers = providers_from_env()
+    ghapp = ghapp or app_from_env()               # private repositories, when the GitHub App is set up
+    if ghapp:
+        jobs.token_fn = ghapp.token
+    private_repos_cache: dict[str, tuple[float, list]] = {}
     dev_login = os.environ.get("JUSTIFY_DEV_LOGIN") == "1"
     login = LoginFlow(database, providers, base_url)
     accounts_on = bool(providers) or dev_login
@@ -236,7 +244,8 @@ def create_app(jobs: Jobs | None = None) -> Starlette:
                              "providers": [{"key": k, "label": p.label} for k, p in providers.items()]
                              + ([{"key": "dev", "label": "Developer (local only)"}] if dev_login and local else []),
                              "quotas": {"anonymous": q.anonymous, "member": q.member},
-                             "mcp_url": f"{base_url}/mcp"}, headers={"Cache-Control": "max-age=60"})
+                             "github_app": bool(ghapp), "mcp_url": f"{base_url}/mcp"},
+                            headers={"Cache-Control": "max-age=60"})
 
     # ---------------------------------------------------------------- scans
 
@@ -261,9 +270,11 @@ def create_app(jobs: Jobs | None = None) -> Starlette:
         if not ok:
             return err(f"That is a lot of requests from one address. Try again in about {wait // 60 + 1} minutes.",
                        429, "rate_limited", retry_after=wait)
+        if body.get("private"):
+            return await private_scan(request, user, rr, ip)
         try:
-            scan, _ = await run_in_threadpool(jobs.submit, rr, f"web:{ip}", user["id"] if user else None,
-                                              lambda tx: accounts.charge(user, ip, tx))
+            scan, _ = await run_in_threadpool(jobs.submit, rr, "web" if how == "session" else "api",
+                                              user["id"] if user else None, lambda tx: accounts.charge(user, ip, tx))
         except QuotaExceeded as exc:
             return quota_error(exc, user)
         except FetchError as exc:
@@ -271,12 +282,108 @@ def create_app(jobs: Jobs | None = None) -> Starlette:
         await run_in_threadpool(accounts.remember, user, scan["id"], "web" if how == "session" else "api")
         return JSONResponse(scan, status_code=202 if scan["status"] != "done" else 200)
 
+    # ---------------------------------------------------------------- private repositories (GitHub App)
+
+    async def private_repo_list(user: dict, fresh: bool = False) -> list[dict]:
+        hit = private_repos_cache.get(user["id"])
+        if hit and not fresh and hit[0] > time.monotonic() - 60:
+            return hit[1]
+        repos: list[dict] = []
+        for inst in await run_in_threadpool(accounts.installations, user["id"]):
+            try:
+                repos += await run_in_threadpool(ghapp.repos, inst)
+            except AppError:
+                continue                               # uninstalled on GitHub since: nothing to list
+        private_repos_cache[user["id"]] = (time.monotonic(), repos)
+        return repos
+
+    async def private_scan(request: Request, user, rr, ip) -> Response:
+        if user is None or ghapp is None:
+            return err("Sign in with GitHub and connect your private repositories first.", 401, "signin")
+        key = parse_key(request.headers.get("x-justify-result-key"))
+        if key is None:
+            return err("Your browser sends the key that seals the result. Reload the page and try again.", 400, "no_key")
+        found = next((r for r in await private_repo_list(user) if r["full_name"].lower() == rr.slug.lower()), None)
+        if not found:
+            return err("That repository is not one you connected. Add it to the Justify GitHub App first.", 403,
+                       "not_connected")
+        try:
+            scan = await run_in_threadpool(lambda: jobs.submit_private_repo(
+                rr, user["id"], found["installation_id"], key, "web", charge=lambda tx: accounts.charge(user, ip, tx)))
+        except QuotaExceeded as exc:
+            return quota_error(exc, user)
+        except (FetchError, AppError) as exc:
+            return err(str(exc), getattr(exc, "status", 502), getattr(exc, "code", "github"))
+        await run_in_threadpool(accounts.remember, user, scan["id"], "web")
+        return JSONResponse(scan, status_code=202)
+
+    async def my_private_repos(request: Request) -> Response:
+        user, _, _, _ = await who(request)
+        if (bad := need_user(user)):
+            return bad
+        if ghapp is None:
+            return JSONResponse({"enabled": False, "repos": []})
+        github = await run_in_threadpool(accounts.github_id, user["id"])
+        repos = await private_repo_list(user, fresh=request.query_params.get("fresh") == "1")
+        return JSONResponse({"enabled": True, "github": bool(github), "connected": bool(repos) or bool(
+            await run_in_threadpool(accounts.installations, user["id"])), "repos": repos},
+            headers={"Cache-Control": "no-store"})
+
+    async def github_connect(request: Request) -> Response:
+        found = await run_in_threadpool(accounts.session, request.cookies.get(SESSION_COOKIE))
+        if ghapp is None:
+            return _message_page("Not available", "Private repositories are not switched on here.", 404)
+        if not found:
+            return RedirectResponse(f"/signin?next={quote('/github/connect')}", status_code=303)
+        if not await run_in_threadpool(accounts.github_id, found[0]["id"]):
+            return _message_page("Sign in with GitHub first",
+                                 "Private repositories are connected through the GitHub account you sign in with.", 400)
+        state = secrets.token_urlsafe(24)
+        await run_in_threadpool(database.write, "INSERT INTO login_states (state, provider, verifier, nonce, next, created) "
+                                "VALUES (?,?,?,?,?,?)", (state, "ghapp", found[0]["id"], "", "/?repos=1", time.time()))
+        resp = RedirectResponse(ghapp.install_url(state), status_code=302)
+        resp.set_cookie("jfy_gh", state, max_age=900, httponly=True, secure=secure_cookies, samesite="lax", path="/github")
+        return resp
+
+    async def github_installed(request: Request) -> Response:
+        """Where GitHub sends the person back after installing the App. The installation is kept only
+        if GitHub confirms it sits on the GitHub account this person signed in with."""
+        if ghapp is None:
+            return _message_page("Not available", "Private repositories are not switched on here.", 404)
+        q = request.query_params
+        state, cookie = q.get("state", ""), request.cookies.get("jfy_gh", "")
+        found = await run_in_threadpool(accounts.session, request.cookies.get(SESSION_COOKIE))
+        row = await run_in_threadpool(database.one, "SELECT * FROM login_states WHERE state=? AND provider='ghapp'", (state,))
+        await run_in_threadpool(database.write, "DELETE FROM login_states WHERE state=?", (state,))
+        if not found or not row or not state or state != cookie or row["verifier"] != found[0]["id"] \
+                or row["created"] < time.time() - 900:
+            return _message_page("Try again", "This connection did not start from your signed-in session.", 403)
+        try:
+            inst_id = int(q.get("installation_id", "0"))
+            inst = await run_in_threadpool(ghapp.installation, inst_id)
+        except (ValueError, AppError) as exc:
+            return _message_page("GitHub did not confirm it", str(exc) or "That installation was not found.", 400)
+        github = await run_in_threadpool(accounts.github_id, found[0]["id"])
+        account = inst.get("account") or {}
+        if not github or str(account.get("id")) != str(github):
+            return _message_page("Install it on your own account",
+                                 "Justify connects private repositories on the GitHub account you signed in with.", 403)
+        await run_in_threadpool(accounts.add_installation, found[0]["id"], inst_id, account.get("login") or "")
+        private_repos_cache.pop(found[0]["id"], None)
+        resp = RedirectResponse("/?repos=1", status_code=303)
+        resp.delete_cookie("jfy_gh", path="/github")
+        return resp
+
     async def create_upload(request: Request) -> Response:
         user, _, how, bad = await who(request, mutate=True)
         if bad:
             return bad
         if user is None:
             return err("Sign in to audit your own code — the result stays private to your account.", 401, "signin")
+        key = parse_key(request.headers.get("x-justify-result-key"))
+        if key is None:
+            return err("Your browser sends the key that seals the result, and keeps the only copy. Reload the page "
+                       "and try again.", 400, "no_key")
         ip = ip_of(request)
         ok, wait = burst.take(f"web:{ip}")
         if not ok:
@@ -305,7 +412,7 @@ def create_app(jobs: Jobs | None = None) -> Starlette:
                 name = clean_name(request.query_params.get("name") or "code.zip")
                 dest = await run_in_threadpool(unpack_zip, data, root)
             scan = await run_in_threadpool(lambda: jobs.submit_upload(
-                dest, name, user["id"], f"web:{ip}", charge=lambda tx: accounts.charge(user, ip, tx)))
+                dest, name, user["id"], "web", charge=lambda tx: accounts.charge(user, ip, tx), key=key))
         except (json.JSONDecodeError, UnicodeDecodeError):
             return err("Send {\"name\": ..., \"files\": [...]}.", 400, "bad_json")
         except QuotaExceeded as exc:
@@ -326,10 +433,25 @@ def create_app(jobs: Jobs | None = None) -> Starlette:
         cache = "no-store" if scan["status"] != "done" or scan["private"] else "max-age=300"
         return JSONResponse(scan, headers={"Cache-Control": cache})
 
+    async def sealed_result(request: Request) -> Response:
+        """A private result as ciphertext. Only its owner gets it, and only their browser can open it."""
+        user, _, _, _ = await who(request)
+        scan_id = request.path_params["scan_id"]
+        scan = await run_in_threadpool(lambda: jobs.get(scan_id, with_result=False,
+                                                        viewer=user["id"] if user else None))
+        if not scan or not scan.get("sealed"):
+            return err("No sealed result with that id.", 404, "not_found")
+        data = await run_in_threadpool(jobs.results.get_sealed, scan_id)
+        if not data:
+            return err("The sealed result is missing.", 404, "not_found")
+        return Response(data, media_type="application/octet-stream", headers={"Cache-Control": "no-store"})
+
     async def report_md(request: Request) -> Response:
         user, _, _, _ = await who(request)
         scan_id = request.path_params["scan_id"]
         scan = await run_in_threadpool(lambda: jobs.get(scan_id, viewer=user["id"] if user else None))
+        if scan and scan.get("sealed"):
+            return err("This audit is sealed: only your browser can open it. Download it from the page.", 409, "sealed")
         if not scan or scan["status"] != "done":
             return err("That scan has no report yet.", 404, "not_ready")
         from ..engine import Result
@@ -356,8 +478,9 @@ def create_app(jobs: Jobs | None = None) -> Starlette:
             return err("Not signed in.", 401, "signin")
         usage = await run_in_threadpool(accounts.usage, user, ip_of(request))
         count = await run_in_threadpool(accounts.history_count, user["id"])
-        return JSONResponse({"user": user, "csrf": csrf, "usage": usage, "audits": count, "via": how},
-                            headers={"Cache-Control": "no-store"})
+        providers = await run_in_threadpool(accounts.identities, user["id"])
+        return JSONResponse({"user": user, "csrf": csrf, "usage": usage, "audits": count, "via": how,
+                             "providers": providers}, headers={"Cache-Control": "no-store"})
 
     async def delete_me(request: Request) -> Response:
         user, _, how, bad = await who(request, mutate=True)
@@ -397,7 +520,7 @@ def create_app(jobs: Jobs | None = None) -> Starlette:
         repo = (request.query_params.get("repo") or "")[:200]
         audits = await run_in_threadpool(jobs.audits_of, repo, user["id"])
         diff = None
-        if len(audits) >= 2:
+        if len(audits) >= 2 and not (audits[0]["sealed"] or audits[1]["sealed"]):
             new, old = await run_in_threadpool(lambda: (jobs.results.get(audits[0]["id"]),
                                                         jobs.results.get(audits[1]["id"])))
             if new and old:
@@ -557,6 +680,7 @@ def create_app(jobs: Jobs | None = None) -> Starlette:
         Route("/api/uploads", create_upload, methods=["POST"]),
         Route("/api/scans/{scan_id}", get_scan),
         Route("/api/scans/{scan_id}/report.md", report_md),
+        Route("/api/scans/{scan_id}/sealed", sealed_result),
         Route("/api/recent", recent),
         Route("/api/me", me), Route("/api/me", delete_me, methods=["DELETE"]),
         Route("/api/me/scans", my_scans),
@@ -570,6 +694,9 @@ def create_app(jobs: Jobs | None = None) -> Starlette:
         Route("/auth/logout", logout, methods=["POST"]),
         Route("/auth/{provider}/start", auth_start),
         Route("/auth/{provider}/callback", auth_callback),
+        Route("/github/connect", github_connect),
+        Route("/github/installed", github_installed),
+        Route("/api/me/private-repos", my_private_repos),
         Route("/oauth/consent", consent, methods=["GET", "POST"]),
         Mount("/static", app=StaticFiles(directory=STATIC), name="static"),
     ]

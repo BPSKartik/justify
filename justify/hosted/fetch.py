@@ -10,6 +10,7 @@ create a symlink, ask for a password or pull LFS objects.
 
 from __future__ import annotations
 
+import base64
 import os
 import re
 import shutil
@@ -78,20 +79,27 @@ def parse(repo: str, ref: str = "") -> RepoRef:
     return RepoRef(owner, name, ref)
 
 
-def _env(home: str) -> dict:
-    return {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": home, "LANG": "C.UTF-8",
-            "GIT_TERMINAL_PROMPT": "0", "GIT_LFS_SKIP_SMUDGE": "1", "GIT_CONFIG_NOSYSTEM": "1",
-            "GIT_ASKPASS": "/bin/false", "SSH_ASKPASS": "/bin/false"}
+def _env(home: str, token: str | None = None) -> dict:
+    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": home, "LANG": "C.UTF-8",
+           "GIT_TERMINAL_PROMPT": "0", "GIT_LFS_SKIP_SMUDGE": "1", "GIT_CONFIG_NOSYSTEM": "1",
+           "GIT_ASKPASS": "/bin/false", "SSH_ASKPASS": "/bin/false"}
+    if token:
+        # a GitHub App installation token, passed in the environment — never on a command line other
+        # processes could read, never written into the clone's own config
+        basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+        env.update({"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "http.https://github.com/.extraHeader",
+                    "GIT_CONFIG_VALUE_0": f"Authorization: Basic {basic}"})
+    return env
 
 
-def resolve(rr: RepoRef, timeout: int = 30) -> tuple[str, str]:
+def resolve(rr: RepoRef, timeout: int = 30, token: str | None = None) -> tuple[str, str]:
     """The commit to scan and the branch or tag it came from, without downloading anything."""
     with tempfile.TemporaryDirectory(prefix="justify-ls-") as home:
         args = GIT + ["ls-remote", "--symref", "--", rr.clone_url, "HEAD"] if not rr.ref else \
             GIT + ["ls-remote", "--", rr.clone_url, f"refs/heads/{rr.ref}", f"refs/tags/{rr.ref}",
                    f"refs/tags/{rr.ref}^{{}}"]
         try:
-            r = subprocess.run(args, capture_output=True, text=True, timeout=timeout, env=_env(home))
+            r = subprocess.run(args, capture_output=True, text=True, timeout=timeout, env=_env(home, token))
         except subprocess.TimeoutExpired:
             raise FetchError("GitHub did not answer in time. Try again in a minute.", 504, "timeout") from None
     if r.returncode != 0:
@@ -127,7 +135,7 @@ def _size_mb(path: str) -> float:
     return total / 1_048_576
 
 
-def clone(rr: RepoRef, branch: str, dest: str, timeout: int = 180, max_mb: int = 400) -> str:
+def clone(rr: RepoRef, branch: str, dest: str, timeout: int = 180, max_mb: int = 400, token: str | None = None) -> str:
     """Full history (attribution needs every commit), blobs over 1 MB left on the server, the
     size watched while it downloads. Returns the commit actually checked out."""
     home = tempfile.mkdtemp(prefix="justify-git-")
@@ -135,7 +143,7 @@ def clone(rr: RepoRef, branch: str, dest: str, timeout: int = 180, max_mb: int =
     if branch and branch != "HEAD":
         args += ["--branch", branch]
     args += ["--", rr.clone_url, dest]
-    p = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, env=_env(home),
+    p = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, env=_env(home, token),
                          start_new_session=True)
     start = time.monotonic()
     try:

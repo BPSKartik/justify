@@ -5,12 +5,18 @@ Nothing secret is stored in a form that is useful if the database leaks. Session
 tokens and refresh tokens are random values the client holds; the database keeps only their
 SHA-256. A provider's own access token (GitHub's, Microsoft's) is used once to read the profile
 and then dropped — Justify never holds a key to anyone's GitHub.
+
+And only what the service needs is kept at all: a display name, a GitHub username and picture —
+never an email address, never a network address. The daily allowance of someone without an
+account is counted under a keyed hash of their address, and the key lives only in memory and
+changes every day, so the counts cannot be turned back into addresses, by anyone.
 """
 
 from __future__ import annotations
 
 import datetime as _dt
 import hashlib
+import hmac
 import json
 import os
 import secrets
@@ -77,6 +83,15 @@ class Accounts:
     def __init__(self, db: Database, quotas: Quotas | None = None):
         self.db = db
         self.quotas = quotas or Quotas()
+        self._salts: dict[str, bytes] = {}      # one per day, memory only
+        # what earlier code kept and this code does not: emails, Microsoft sign-in names (often an
+        # email), network addresses in the usage counts and in each scan's "client"
+        self.db.write("UPDATE users SET email=NULL WHERE email IS NOT NULL")
+        self.db.write("UPDATE users SET login=NULL WHERE login IS NOT NULL AND id IN "
+                      "(SELECT user_id FROM identities WHERE provider='microsoft')")
+        self.db.write("DELETE FROM usage WHERE who LIKE 'ip:%.%' OR who LIKE 'ip:%:%' "
+                      "OR who LIKE 'mcp:%.%' OR who LIKE 'mcp:%:%'")
+        self.db.write("UPDATE scans SET client=substr(client, 1, instr(client, ':') - 1) WHERE client LIKE '%:%'")
 
     # ------------------------------------------------------------------ users
 
@@ -94,9 +109,13 @@ class Accounts:
         now = time.time()
         login = (profile.get("login") or "")[:80]
         name = (profile.get("name") or login or "")[:120]
-        email = (profile.get("email") or "")[:200] or None
+        email = (profile.get("email") or "")[:200]
         avatar = profile.get("avatar") if str(profile.get("avatar") or "").startswith("https://") else None
-        admin = {f"{provider}:{login}".lower(), (email or "").lower()} & self.quotas.admins
+        # the owner list is checked now, while the provider's answer is in memory; then the email and a
+        # Microsoft sign-in name (often an email) are dropped — only a GitHub username, which is public, stays
+        admin = {f"{provider}:{login}".lower(), email.lower()} - {""} & self.quotas.admins
+        login = login if provider in ("github", "dev") else None
+        email = None
         with self.db.transaction() as tx:
             row = tx.execute("SELECT user_id FROM identities WHERE provider=? AND subject=?",
                              (provider, subject)).fetchone()
@@ -222,7 +241,31 @@ class Accounts:
     # ------------------------------------------------------------------ usage
 
     def _who(self, user: dict | None, ip: str, channel: str = "web") -> str:
-        return f"u:{user['id']}" if user else f"{'mcp' if channel == 'mcp' else 'ip'}:{ip}"
+        if user:
+            return f"u:{user['id']}"
+        day = today()
+        salt = self._salts.get(day)
+        if salt is None:
+            self._salts = {day: secrets.token_bytes(32)}       # yesterday's key is forgotten
+            salt = self._salts[day]
+        tag = hmac.new(salt, (ip or "unknown").encode(), hashlib.sha256).hexdigest()[:24]
+        return f"{'mcp' if channel == 'mcp' else 'ip'}:{tag}"
+
+    def github_id(self, user_id: str) -> str | None:
+        row = self.db.one("SELECT subject FROM identities WHERE user_id=? AND provider='github'", (user_id,))
+        return row["subject"] if row else None
+
+    def add_installation(self, user_id: str, installation_id: int, account: str) -> None:
+        self.db.write("INSERT INTO github_installations (user_id, installation_id, account, created) VALUES (?,?,?,?) "
+                      "ON CONFLICT(user_id, installation_id) DO UPDATE SET account=excluded.account",
+                      (user_id, int(installation_id), account, time.time()))
+
+    def installations(self, user_id: str) -> list[int]:
+        return [r["installation_id"] for r in
+                self.db.all("SELECT installation_id FROM github_installations WHERE user_id=?", (user_id,))]
+
+    def identities(self, user_id: str) -> list[str]:
+        return [r["provider"] for r in self.db.all("SELECT provider FROM identities WHERE user_id=?", (user_id,))]
 
     def usage(self, user: dict | None, ip: str = "", channel: str = "web") -> dict:
         row = self.db.one("SELECT n FROM usage WHERE who=? AND day=?", (self._who(user, ip, channel), today()))
@@ -291,7 +334,7 @@ class Accounts:
                                                    (user_id,)).fetchall()]
             tx.execute("DELETE FROM scans WHERE owner=? AND visibility='private'", (user_id,))
             tx.execute("UPDATE scans SET owner=NULL WHERE owner=?", (user_id,))
-            for table in ("user_scans", "sessions", "tokens", "oauth_codes"):
+            for table in ("user_scans", "sessions", "tokens", "oauth_codes", "github_installations"):
                 tx.execute(f"DELETE FROM {table} WHERE user_id=?", (user_id,))
             tx.execute("DELETE FROM identities WHERE user_id=?", (user_id,))
             tx.execute("DELETE FROM usage WHERE who=?", (f"u:{user_id}",))
