@@ -668,27 +668,28 @@
   }
 
   /* ---------------------------------------------------------------- measured data */
-  const STUDY = [
-    { repo: "jmorrison-juniper/MistHelper", lines: 606946, ai: 7.59, human: 0.99 },
-    { repo: "PrefectHQ/fastmcp", lines: 250117, ai: 1.67, human: 3.23 },
-    { repo: "Azure/azure-functions-agents-runtime", lines: 54240, ai: 2.39, human: 2.09 },
+  const STUDY = [            // measured 3 Oct 2026, each repository at its latest commit
+    { repo: "jmorrison-juniper/MistHelper", lines: 629811, ai: 7.14, human: 0.99 },
+    { repo: "PrefectHQ/fastmcp", lines: 250830, ai: 1.59, human: 3.26 },
+    { repo: "Azure/azure-functions-agents-runtime", lines: 54240, ai: 2.38, human: 2.09 },
     { repo: "judeper/FSI-CopilotGov", lines: 41188, ai: 0.56, human: 0.0 },
     { repo: "MasterworkTools/openforge-catalog", lines: 37123, ai: 3.23, human: 8.81 },
   ];
-  // the jury's live run on Azure AI Foundry, graded by --prove (3 Oct 2026)
+  // the jury's live run, graded by --prove: 13 units of face-attendance, 84 calls (3 Oct 2026)
   const JURY = [
-    { model: "GPT-5.6 Sol", maker: "OpenAI", right: 10, wrong: 1 },
-    { model: "gpt-oss-120b", maker: "OpenAI", right: 8, wrong: 1 },
-    { model: "Phi-4", maker: "Microsoft", right: 7, wrong: 4 },
-    { model: "Phi-4-reasoning", maker: "Microsoft", right: 6, wrong: 0 },
-    { model: "Llama-3.3-70B", maker: "Meta", right: 5, wrong: 6 },
+    { model: "GPT-5.6 Sol", maker: "OpenAI · Azure AI Foundry", right: 11, wrong: 0 },
+    { model: "gpt-oss-120b", maker: "OpenAI · Azure AI Foundry", right: 11, wrong: 0 },
+    { model: "Claude Opus 5.5", maker: "Anthropic · Claude Code", right: 9, wrong: 2 },
+    { model: "Phi-4", maker: "Microsoft · Azure AI Foundry", right: 7, wrong: 4 },
+    { model: "Phi-4-reasoning", maker: "Microsoft · Azure AI Foundry", right: 4, wrong: 0 },
+    { model: "Llama-3.3-70B", maker: "Meta · Azure AI Foundry", right: 4, wrong: 7 },
   ];
 
   function renderDupChart() {
     const box = $("dup-chart");
     const max = Math.max(...STUDY.flatMap((r) => [r.ai, r.human]));
     const table = $("dup-table");
-    table.append(el("tr", {}, el("th", { text: "Repository" }), el("th", { text: "AI-assisted" }), el("th", { text: "No AI trace" })));
+    table.append(el("tr", {}, el("th", { text: "Repository" }), el("th", { text: "AI-signed" }), el("th", { text: "No AI trace" })));
     for (const r of STUDY) {
       const bar = (cls, v) => {
         const i = el("i");

@@ -589,6 +589,7 @@ def create_app(jobs: Jobs | None = None) -> Starlette:
 def _stats(rows: list[dict]) -> dict:
     """Totals, a 30-day activity strip, languages, assistants and per-repository trends, from a
     person's history (newest first)."""
+    from ..polyglot import COPY_LANGS
     import datetime as _dt
     done = [r for r in rows if r["status"] == "done" and r.get("summary")]
     latest: dict[str, dict] = {}
@@ -619,7 +620,10 @@ def _stats(rows: list[dict]) -> dict:
     jlrs = []
     for s in latest.values():
         for lang in s.get("languages") or []:
-            if lang.get("audit", "full") in ("full", "copies"):          # code, not docs or data
+            # code, not docs or data (summaries written before "audit" was recorded go by name)
+            audit = lang.get("audit") or ("full" if lang["name"] == "Python" else
+                                          "copies" if lang["name"] in COPY_LANGS else "none")
+            if audit in ("full", "copies"):
                 langs[lang["name"]] = langs.get(lang["name"], 0) + lang["lines"]
         for k, v in (s.get("tools") or {}).items():
             tools[k] = tools.get(k, 0) + v

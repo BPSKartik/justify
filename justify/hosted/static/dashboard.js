@@ -147,7 +147,10 @@
         el("td", { class: "num" }, fmt(L.dup_lines), P ? delta(L.dup_lines, P.dup_lines, 0, false) : null),
         el("td", { class: "num" }, L.ai_share == null ? "—" : `${fmt(L.ai_share, 0)}%`),
         el("td", { class: "num" }, fmt(r.audits)),
-        el("td", { class: "acts" }, r.audits > 1 ? el("button", { type: "button", class: "ghost", onclick: () => openCompare(r.repo, name) }, "What changed") : null)));
+        el("td", { class: "acts" }, r.audits > 1 ? el("button", { type: "button", class: "ghost", onclick: () => {
+          history.replaceState(null, "", `#compare=${encodeURIComponent(r.repo)}`);
+          openCompare(r.repo, name);
+        } }, "What changed") : null)));
     }
   }
 
@@ -290,7 +293,14 @@
     loadHistory(false);
     loadApps();
     loadTokens();
-    if (location.hash) { const t = document.querySelector(location.hash); if (t) t.scrollIntoView(); }
+    const deep = location.hash.match(/^#compare=(.+)$/);
+    if (deep) {                                   // a link straight to "what changed" for one repository
+      const repo = decodeURIComponent(deep[1]);
+      openCompare(repo, repo.replace(/^upload\//, ""));
+    } else if (location.hash) {
+      const t = document.querySelector(location.hash);
+      if (t) t.scrollIntoView();
+    }
   }
   init();
 })();

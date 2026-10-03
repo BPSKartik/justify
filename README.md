@@ -29,29 +29,32 @@ nothing. Justify says so instead of calling it proved.
 
 ## What it found on public AI-assisted repositories
 
-Five public Python repositories whose history carries AI-assistant commit trailers — 3,247 files,
-989,614 lines — scanned without proof (static stages + attribution). Numbers are per 1,000 lines
-of the code each kind of commit wrote and that still survives.
+Five public Python repositories whose history carries AI-assistant signatures — 3,434 Python files,
+1,013,192 lines — scanned on 3 October 2026 at each repository's latest commit, without proof
+(static stages + attribution). Numbers are per 1,000 lines of the code each kind of commit wrote
+and that still survives.
 
-| Repository | Lines | AI-assisted commits | Unused code / 1,000 (AI · human) | Duplicate code / 1,000 (AI · human) | Lines later rewritten (AI · human) |
+| Repository | Lines | AI-signed commits | Unused code / 1,000 (AI · no trace) | Duplicate code / 1,000 (AI · no trace) | Lines later rewritten (AI · no trace) |
 |---|---:|---:|---|---|---|
-| PrefectHQ/fastmcp | 250,117 | 434 of 4,041 | 0.00 · 0.12 | 1.67 · 3.23 | 36.1% · 39.9% |
-| jmorrison-juniper/MistHelper | 606,946 | 815 of 2,024 | 0.00 · 0.20 | **7.59 · 0.99** | 16.7% · 40.3% |
-| Azure/azure-functions-agents-runtime | 54,240 | 140 of 465 | 0.00 · 0.00 | 2.39 · 2.09 | 12.5% · 42.1% |
-| MasterworkTools/openforge-catalog | 37,123 | 113 of 611 | 0.00 · 0.00 | 3.23 · 8.81 | 7.2% · 0.1% |
-| judeper/FSI-CopilotGov | 41,188 | 217 of 530 | 0.45 · 0.58 | 0.56 · 0.00 | 5.7% · 0.0% |
+| PrefectHQ/fastmcp | 250,830 | 470 of 4,051 | 0.00 · 0.12 | 1.59 · 3.26 | 35.1% · 40.1% |
+| jmorrison-juniper/MistHelper | 629,811 | 829 of 2,040 | 0.00 · 0.20 | **7.14 · 0.99** | 16.9% · 40.3% |
+| Azure/azure-functions-agents-runtime | 54,240 | 144 of 465 | 0.00 · 0.00 | 2.38 · 2.09 | 12.4% · 42.1% |
+| MasterworkTools/openforge-catalog | 37,123 | 115 of 613 | 0.00 · 0.00 | 3.23 · 8.81 | 7.2% · 0.1% |
+| judeper/FSI-CopilotGov | 41,188 | 217 of 531 | 0.45 · 0.58 | 0.56 · 0.00 | 5.7% · 0.0% |
 
 What the data says, honestly:
 
-- **Unused code is not where AI-assisted code costs.** In all five, AI-assisted lines carry no more
-  unused imports or functions than human lines. Two repositories have none at all: their linters
+- **Unused code is not where AI-assisted code costs.** In all five, AI-signed lines carry no more
+  unused imports or functions than the rest. Two repositories have none at all: their linters
   already remove them.
-- **Duplication is.** AI-assisted code duplicates more in three of five — 7.7× the human rate in
+- **Duplication is.** AI-signed code duplicates more in three of five — 7.2× the rate of the rest in
   the largest repository.
 - **There is no single answer.** The same assistant pays off in one repository and costs in
   another, which is why it has to be measured per repository rather than argued in general.
 
-Caveats: authorship comes from commit trailers, so the AI share is a lower bound; rework counts
+The first run, on 2 October, read commit trailers only and gave the same three findings (7.7× in
+MistHelper, which has grown by 22,865 lines since). Caveats: authorship comes from assistant signatures in commits (trailers, "Generated with" lines,
+agent accounts), so the AI share is a lower bound; rework counts
 from the first AI-assisted commit, and newer code has had less time to be rewritten.
 
 ## Use it in the browser

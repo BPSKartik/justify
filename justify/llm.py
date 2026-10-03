@@ -11,8 +11,14 @@ environment — keys are read from environment variables and never stored:
                  (the model runs inside the customer's own Azure tenant)
   openai         JUSTIFY_LLM_BASE_URL (+ JUSTIFY_LLM_API_KEY, JUSTIFY_LLM_MODEL) —
                  any OpenAI-compatible server, including a local Ollama
+  anthropic      ANTHROPIC_API_KEY (+ JUSTIFY_ANTHROPIC_MODEL, default claude-opus-5-5) — Claude
+                 through Anthropic's Messages API; ANTHROPIC_BASE_URL with JUSTIFY_ANTHROPIC_ENTRA=1
+                 reaches a Claude deployment in Azure AI Foundry with an Entra sign-in instead
   claude-cli     the Claude Code command line, if installed and signed in
                  (found on PATH, in ~/.local/bin, or at JUSTIFY_CLAUDE_BIN)
+
+A jury mixes them: JUSTIFY_FOUNDRY_MODELS names Foundry deployments, and an entry written
+"claude-cli:claude-opus-5-5" or "anthropic:claude-opus-5-5" seats a Claude model beside them.
 
 GitHub Models was retired on 30 July 2026, so it is no longer offered.
 
@@ -29,6 +35,7 @@ import re
 import shutil
 import ssl
 import subprocess
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -223,30 +230,92 @@ class Jury(Model):
 
 
 class ClaudeCli(Model):
-    name = "claude-cli"
+    """Claude through the Claude Code command line, on the signed-in person's own plan — no key.
+    A juror judges from what it is shown, so it runs with no tools, no MCP servers, its own
+    system prompt, and a working directory with no project in it."""
 
     def __init__(self, binary: str, model: str | None = None):
         self.binary = binary
         self.model = model or os.environ.get("JUSTIFY_CLAUDE_MODEL", "haiku")
+        self.name = self.model if self.model.startswith("claude-") else "claude-cli"
+        self.timeout = max(180, int(os.environ.get("JUSTIFY_MODEL_TIMEOUT_S") or 0))
+        self.seconds = 0.0
+        self.isolated = True                  # older Claude Code builds lack --tools; then fall back
 
     def ask(self, system: str, user: str) -> dict:
-        prompt = f"{system}\n\n{user}\n\nAnswer with the JSON object only."
-        cmd = [self.binary, "-p", prompt, "--output-format", "json", "--model", self.model]
+        start = time.monotonic()
+        prompt = f"{user}\n\nAnswer with the JSON object only."
+        if self.isolated:
+            cmd = [self.binary, "-p", prompt, "--output-format", "json", "--model", self.model,
+                   "--tools", "", "--strict-mcp-config", "--system-prompt", system]
+        else:
+            cmd = [self.binary, "-p", f"{system}\n\n{prompt}", "--output-format", "json", "--model", self.model]
         try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=self.timeout, cwd=tempfile.gettempdir())
+            if self.isolated and r.returncode != 0 and "unknown option" in (r.stderr or "").lower():
+                self.isolated = False
+                return self.ask(system, user)
         except subprocess.TimeoutExpired:
-            raise ModelError("claude-cli: timed out") from None
+            raise ModelError(f"{self.name}: no answer within {self.timeout} s") from None
+        self.seconds = round(time.monotonic() - start, 1)
         try:
             envelope = json.loads(r.stdout)
         except json.JSONDecodeError:
             envelope = None
         if r.returncode != 0 or (isinstance(envelope, dict) and envelope.get("is_error")):
             said = (envelope or {}).get("result") if isinstance(envelope, dict) else None
-            raise ModelError(f"claude-cli: {said or r.stderr[-200:] or 'exit ' + str(r.returncode)} — "
+            raise ModelError(f"{self.name}: {said or r.stderr[-200:] or 'exit ' + str(r.returncode)} — "
                              f"sign in once with `{self.binary}` then /login, or configure another provider")
         if isinstance(envelope, dict):
             return _extract_json(envelope.get("result", ""))
         return _extract_json(r.stdout)
+
+
+class _Anthropic(Model):
+    """Claude through Anthropic's Messages API: api.anthropic.com with a key, or — with
+    ANTHROPIC_BASE_URL pointed at a Foundry resource's /anthropic endpoint — a Claude deployment
+    in Azure AI Foundry, signed in with Entra. (Foundry offers Claude in a few regions and on paid
+    subscriptions only; an Azure for Students subscription cannot deploy it.)"""
+
+    def __init__(self, model: str, base: str | None = None, key: str | None = None, auth=None):
+        self.model, self.name = model, model
+        self.base = (base or "https://api.anthropic.com").rstrip("/")
+        self.key, self.auth = key, auth
+        self.timeout = int(os.environ.get("JUSTIFY_MODEL_TIMEOUT_S") or 120)
+        self.seconds = 0.0
+
+    def ask(self, system: str, user: str) -> dict:
+        start = time.monotonic()
+        body = json.dumps({"model": self.model, "max_tokens": 2500, "system": system,
+                           "messages": [{"role": "user", "content": f"{user}\n\nAnswer with the JSON object only."}]})
+        for attempt in range(6):
+            headers = {"content-type": "application/json", "anthropic-version": "2023-06-01"}
+            if self.key:
+                headers["x-api-key"] = self.key
+            if self.auth:
+                headers["Authorization"] = f"Bearer {self.auth()}"
+            req = urllib.request.Request(f"{self.base}/v1/messages", data=body.encode(), headers=headers, method="POST")
+            try:
+                with urllib.request.urlopen(req, timeout=self.timeout, context=_ssl_context()) as r:
+                    data = json.loads(r.read().decode("utf-8", errors="replace"))
+                break
+            except urllib.error.HTTPError as exc:
+                said = exc.read()[:300].decode("utf-8", errors="replace")
+                if exc.code in (429, 529) and attempt < 5:       # rate limited, or Anthropic is overloaded
+                    time.sleep(min(30, int(exc.headers.get("Retry-After") or 5 * (attempt + 1))))
+                    continue
+                raise ModelError(f"{self.name}: HTTP {exc.code} {said[:200]!r}") from None
+            except json.JSONDecodeError:
+                raise ModelError(f"{self.name}: the endpoint did not answer with JSON — check ANTHROPIC_BASE_URL") from None
+            except urllib.error.URLError as exc:
+                raise ModelError(f"{self.name}: {exc.reason}") from None
+            except (TimeoutError, OSError) as exc:
+                raise ModelError(f"{self.name}: no answer within {self.timeout} s ({exc.__class__.__name__})") from None
+        else:
+            raise ModelError(f"{self.name}: gave up after repeated rate limits")
+        self.seconds = round(time.monotonic() - start, 1)
+        text = "".join(b.get("text", "") for b in data.get("content", []) if isinstance(b, dict) and b.get("type") == "text")
+        return _extract_json(text)
 
 
 def from_environment() -> Model | None:
@@ -269,7 +338,9 @@ def from_environment() -> Model | None:
 
     def foundry():
         """Azure AI Foundry: one endpoint, many makers' models. JUSTIFY_FOUNDRY_MODELS lists the
-        deployments; more than one makes a jury. "claude-cli" in the list adds Claude locally."""
+        deployments; more than one makes a jury. "claude-cli[:model]" or "anthropic:model" in the list
+        seats a Claude model too — Opus 5.5 cannot be deployed on a student subscription, but it can
+        sit on the jury through the Claude Code sign-in or an Anthropic key."""
         base = env.get("JUSTIFY_FOUNDRY_ENDPOINT")
         names = [n.strip() for n in env.get("JUSTIFY_FOUNDRY_MODELS", "").split(",") if n.strip()]
         if not base or not names:
@@ -278,32 +349,45 @@ def from_environment() -> Model | None:
         url = f"{base.rstrip('/')}/models/chat/completions?api-version=2024-05-01-preview"
         members: list[Model] = []
         for n in names:
-            if n == "claude-cli":
-                c = claude()
+            kind, _, model = n.partition(":")
+            if kind == "claude-cli":
+                c = claude(model or None)
                 if c:
                     members.append(c)
+                continue
+            if kind == "anthropic":
+                a = anthropic(model or None)
+                if a:
+                    members.append(a)
                 continue
             members.append(_HttpChat(url, {}, n, n, auth=token))
         if len(members) == 1:
             return members[0]
-        wanted = env.get("JUSTIFY_JURY_CHALLENGER", names[0])
+        wanted = env.get("JUSTIFY_JURY_CHALLENGER", members[0].name)
         challenger = next((m for m in members if m.name == wanted), members[0])
         return Jury(members, challenger)
 
-    def claude():
+    def claude(model: str | None = None):
         for candidate in (env.get("JUSTIFY_CLAUDE_BIN"), shutil.which("claude"),
                           os.path.expanduser("~/.local/bin/claude")):
             if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-                return ClaudeCli(candidate)
+                return ClaudeCli(candidate, model)
 
-    order = {"azure": azure, "foundry": foundry, "openai": openai_compatible, "claude-cli": claude}
+    def anthropic(model: str | None = None):
+        key, entra = env.get("ANTHROPIC_API_KEY"), env.get("JUSTIFY_ANTHROPIC_ENTRA") == "1"
+        if key or entra:
+            return _Anthropic(model or env.get("JUSTIFY_ANTHROPIC_MODEL", "claude-opus-5-5"), env.get("ANTHROPIC_BASE_URL"),
+                              key, EntraToken() if entra else None)
+
+    order = {"azure": azure, "foundry": foundry, "openai": openai_compatible, "anthropic": anthropic,
+             "claude-cli": claude}
     if choice == "github":
         raise ValueError("GitHub Models was retired on 30 July 2026. Use azure, openai (any OpenAI-compatible "
                          "server, including Ollama) or claude-cli.")
     if choice:
         fn = order.get(choice)
         return fn() if fn else None
-    for fn in (foundry, azure, openai_compatible, claude):
+    for fn in (foundry, azure, openai_compatible, anthropic, claude):
         m = fn()
         if m:
             return m

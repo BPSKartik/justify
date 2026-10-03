@@ -222,3 +222,69 @@ def test_the_last_complete_json_object_is_the_answer():
     text = ('thinking... maybe {"verdict": "keep"} no wait. {"verdict": "remove", "reason": "a {brace} in a string", '
             '"evidence": [], "confidence": 0.9}. I will now produce final JSON.{"verdict": "remove", "confidence": 0.95}')
     assert _extract_json(text) == {"verdict": "remove", "confidence": 0.95}
+
+
+def test_claude_models_can_sit_on_a_foundry_jury(monkeypatch, tmp_path):
+    """Opus 5.5 cannot be deployed on a student subscription, but it can join the jury through the
+    Claude Code sign-in ("claude-cli:<model>") or an Anthropic key ("anthropic:<model>")."""
+    from justify.llm import ClaudeCli, Jury, _Anthropic, from_environment
+    fake = tmp_path / "claude"
+    log = tmp_path / "args"
+    fake.write_text(f"#!/bin/sh\nprintf '%s\\n' \"$@\" > {log}\n"
+                    "echo '{\"is_error\": false, \"result\": \"{\\\\\"verdict\\\\\": \\\\\"keep\\\\\", \\\\\"confidence\\\\\": 0.9}\"}'\n")
+    fake.chmod(0o755)
+    monkeypatch.setenv("JUSTIFY_CLAUDE_BIN", str(fake))
+    monkeypatch.setenv("JUSTIFY_FOUNDRY_ENDPOINT", "https://example.invalid")
+    monkeypatch.setenv("JUSTIFY_FOUNDRY_MODELS", "gpt-5.6-sol,claude-cli:claude-opus-5-5,anthropic:claude-sonnet-5")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("JUSTIFY_JURY_CHALLENGER", "claude-opus-5-5")
+    monkeypatch.delenv("JUSTIFY_LLM_PROVIDER", raising=False)
+    jury = from_environment()
+    assert isinstance(jury, Jury)
+    assert [m.name for m in jury.members] == ["gpt-5.6-sol", "claude-opus-5-5", "claude-sonnet-5"]
+    assert isinstance(jury.members[1], ClaudeCli) and isinstance(jury.members[2], _Anthropic)
+    assert jury.challenger.name == "claude-opus-5-5"
+    assert jury.members[1].ask("SYSTEM", "UNIT") == {"verdict": "keep", "confidence": 0.9}
+    args = log.read_text().split("\n")
+    # a juror sees only what it is shown: no tools, no MCP servers, its own system prompt
+    assert args[args.index("--tools") + 1] == "" and "--strict-mcp-config" in args
+    assert args[args.index("--system-prompt") + 1] == "SYSTEM" and args[args.index("--model") + 1] == "claude-opus-5-5"
+
+
+def test_anthropic_messages_transport(monkeypatch):
+    import http.server
+    import threading
+    from justify.llm import _Anthropic
+    seen = {}
+
+    class Messages(http.server.BaseHTTPRequestHandler):
+        calls = 0
+
+        def do_POST(self):
+            Messages.calls += 1
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            seen.update(path=self.path, key=self.headers.get("x-api-key"), version=self.headers.get("anthropic-version"),
+                        system=body["system"], model=body["model"])
+            if Messages.calls == 1:                      # overloaded once, then an answer
+                self.send_response(529)
+                self.send_header("Retry-After", "0")
+                self.end_headers()
+                return
+            out = json.dumps({"content": [{"type": "text", "text": "Thinking done.\n{\"verdict\": \"remove\", \"confidence\": 0.8}"}]})
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(out.encode())
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), Messages)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        m = _Anthropic("claude-opus-5-5", f"http://127.0.0.1:{srv.server_port}", "k-123")
+        assert m.ask("SYS", "UNIT") == {"verdict": "remove", "confidence": 0.8}
+        assert seen == {"path": "/v1/messages", "key": "k-123", "version": "2023-06-01", "system": "SYS",
+                        "model": "claude-opus-5-5"}
+    finally:
+        srv.shutdown()

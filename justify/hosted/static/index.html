@@ -314,21 +314,21 @@
   <section id="jury" class="jury band" aria-labelledby="jury-title">
     <div class="wrap jury-grid">
       <div>
-        <p class="eyebrow">The Justify Jury · Azure AI Foundry</p>
-        <h2 id="jury-title" class="section-title">Five models from four makers vote. The tests grade them.</h2>
+        <p class="eyebrow">The Justify Jury · Azure AI Foundry + Claude</p>
+        <h2 id="jury-title" class="section-title">Six models from four makers vote. The tests grade them.</h2>
         <p class="section-lede">One model's opinion is a guess. Justify asks a jury — and then checks every juror against what the project's own tests say really happened.</p>
         <ul class="rules">
           <li><b>Removing needs near-unanimity.</b> Every juror but one must vote remove, each at 0.7 confidence or more.</li>
           <li><b>One real reason vetoes.</b> A keep that cites a file and line where the code is actually used stops the removal.</li>
           <li><b>A split goes to a person.</b> Anything the jury cannot settle is kept and flagged.</li>
-          <li><b>No keys anywhere.</b> Jurors are reached with an Entra sign-in, never an API key.</li>
+          <li><b>No keys anywhere.</b> Foundry jurors answer to an Entra sign-in, Claude Opus 5.5 to the Claude Code sign-in — never an API key.</li>
         </ul>
       </div>
       <figure class="chart scoreboard" aria-labelledby="board-cap">
         <figcaption id="board-cap">Votes the tests proved right</figcaption>
-        <p class="meta">13 units of one repository, every removal run against its own tests · 3 Oct 2026</p>
+        <p class="meta">13 units of one repository, every removal run against its own tests · 84 model calls · 3 Oct 2026</p>
         <div id="board" class="bars"></div>
-        <p class="caveat">A small sample, shown as measured. Answers that broke the required format were not counted: gpt-oss-120b answered validly on 9 of the 11 graded units, Phi-4-reasoning on 6.</p>
+        <p class="caveat">A small sample, shown as measured. Every removal the jury approved passed the tests; its mistakes all kept code that could have gone. Answers that broke the required format were not counted — Phi-4-reasoning answered validly on 4 of the 11 graded units.</p>
       </figure>
     </div>
   </section>
@@ -338,19 +338,19 @@
       <div>
         <p class="eyebrow">What we measured</p>
         <h2 id="data-title" class="section-title">Does it pay off? It depends on the repository.</h2>
-        <p class="section-lede">We ran Justify on five public repositories with AI-assisted commits — 3,247 files, 989,614 lines — and split every finding by who wrote it.</p>
+        <p class="section-lede">We ran Justify on five public repositories with AI-signed commits — 3,434 Python files, 1,013,192 lines, at each one's latest commit on 3 October — and split every finding by who wrote it.</p>
         <ol class="takeaways">
-          <li><b>Unused code is not where AI-assisted code costs.</b> It carried no more than human code in all five.</li>
-          <li><b>Duplication is.</b> Higher in three of five — 7.7× the human rate in the largest repository.</li>
+          <li><b>Unused code is not where AI-assisted code costs.</b> AI-signed code carried no more of it in all five.</li>
+          <li><b>Duplication is.</b> Higher in three of five — 7.2× the rate of the rest in the largest repository.</li>
           <li><b>There is no single answer.</b> The same assistant pays off in one repository and costs in another. Measure yours.</li>
         </ol>
-        <p class="caveat">Static stages and authorship, no proof. AI-assisted = commits with an assistant signature, a lower bound.</p>
+        <p class="caveat">Static stages and authorship, no proof. AI-signed = commits with an assistant signature, a lower bound. The first run, on 2 October, gave the same three findings.</p>
       </div>
       <figure class="chart" aria-labelledby="chart-cap">
         <figcaption id="chart-cap">Duplicate code per 1,000 lines</figcaption>
-        <div class="chart-legend"><span><i class="sw ai"></i>AI-assisted</span><span><i class="sw human"></i>No AI trace</span></div>
+        <div class="chart-legend"><span><i class="sw ai"></i>AI-signed</span><span><i class="sw human"></i>No AI trace</span></div>
         <div id="dup-chart" class="bars"></div>
-        <div class="sr-only"><table id="dup-table"><caption>Duplicate code per 1,000 lines, AI-assisted versus no AI trace</caption></table></div>
+        <div class="sr-only"><table id="dup-table"><caption>Duplicate code per 1,000 lines, AI-signed versus no AI trace</caption></table></div>
       </figure>
     </div>
   </section>
