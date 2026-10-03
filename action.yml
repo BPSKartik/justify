@@ -6,8 +6,19 @@ branding:
 
 inputs:
   path:
-    description: Folder to scan, relative to the repository root.
+    description: >-
+      Root of the project to check, relative to the repository root. It must hold the code, its tests and their
+      config, because the test command runs inside a copy of this folder. Leave it as "." unless this is a
+      self-contained sub-project.
     default: "."
+  python-version:
+    description: Python that installs Justify and runs your tests. Use your project's; it stays on PATH for later steps.
+    default: "3.12"
+  install-command:
+    description: >-
+      Installs your project and its test tools before the proof, e.g. `pip install -e . pytest` or
+      `pip install -r requirements.txt pytest`. Without it the tests cannot run, and nothing is proved.
+    default: ""
   test-command:
     description: Command that runs your tests. When set, every proposed removal is proved in a temporary copy.
     default: ""
@@ -17,10 +28,16 @@ runs:
   steps:
     - uses: actions/setup-python@v6
       with:
-        python-version: "3.12"
+        python-version: ${{ inputs.python-version }}
     - name: Install Justify
       shell: bash
       run: pip install --quiet "${{ github.action_path }}"
+    - name: Install the project
+      if: inputs.install-command != ''
+      shell: bash
+      env:
+        INSTALL_CMD: ${{ inputs.install-command }}
+      run: bash -c "$INSTALL_CMD"
     - name: Scan, prove, report
       shell: bash
       # inputs arrive as environment variables, never pasted into the script,
@@ -29,10 +46,19 @@ runs:
         SCAN_PATH: ${{ inputs.path }}
         TEST_CMD: ${{ inputs.test-command }}
       run: |
-        set -o pipefail
-        if [ -n "$TEST_CMD" ]; then
-          justify scan "$SCAN_PATH" --no-record --report justify-report.md --prove "$TEST_CMD" || true
-        else
-          justify scan "$SCAN_PATH" --no-record --report justify-report.md
+        # outside the checkout, so the next scan never reads an old report as a reference
+        report="$RUNNER_TEMP/justify-report.md"
+        rm -f "$report"
+        args=(scan "$SCAN_PATH" --no-record --report "$report")
+        if [ -n "$TEST_CMD" ]; then args+=(--prove "$TEST_CMD"); fi
+        rc=0
+        justify "${args[@]}" || rc=$?
+        # 0: done · 2 with a report: some removals failed their proof, which is the point · no report: a crash
+        if [ ! -s "$report" ]; then
+          echo "::error title=Justify::Justify stopped (exit $rc) before writing its report. See the log above."
+          exit 1
         fi
-        cat justify-report.md >> "$GITHUB_STEP_SUMMARY"
+        cat "$report" >> "$GITHUB_STEP_SUMMARY"
+        if grep -q "the tests fail before any change" "$report"; then
+          echo "::warning title=Justify::The test command failed before any change, so nothing was proved. Install the project and its test tools with install-command."
+        fi

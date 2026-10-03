@@ -279,9 +279,10 @@ class Attribution:
         biggest = c.most_common(1)[0][1]
         out = _git(self.root, "rev-list", "--count", "HEAD")
         commits = int(out.strip()) if out and out.strip().isdigit() else len(c)
+        shallow = (_git(self.root, "rev-parse", "--is-shallow-repository") or "").strip() == "true"
         return {"commits": commits, "lines_today": total, "largest_commit_lines": biggest,
                 "largest_commit_percent": round(100.0 * biggest / total, 1),
-                "thin": commits <= 2 or biggest / total >= 0.8}
+                "thin": commits <= 2 or biggest / total >= 0.8, "shallow": shallow}
 
     def ai_commits(self) -> tuple[int, int]:
         out = _git(self.root, "log", "--format=%H")
