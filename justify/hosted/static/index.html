@@ -368,7 +368,7 @@
         <article class="tile">
           <p class="tile-kicker">Private by design</p>
           <h3>Sealed so only you can read it.</h3>
-          <p>Your code is deleted when the audit ends. The result is encrypted with a key that stays in your browser. We keep no copy we can open.</p>
+          <p>Your code is deleted when the audit ends. The result is encrypted with a key made in your browser, which we never store. We keep no copy we can open.</p>
           <div class="seal-art" aria-hidden="true"><span class="seal-lock"></span><span class="seal-bytes">9f 3a c1 7e 04 b2 …</span></div>
         </article>
         <article class="tile">
@@ -423,7 +423,7 @@
           <li><b>Removing needs near-unanimity.</b> Every juror but one must vote remove, each at 0.7 confidence or more.</li>
           <li><b>One real reason vetoes.</b> A keep that cites a file and line where the code is used stops the removal.</li>
           <li><b>A split goes to a person.</b> Anything the jury cannot settle is kept and flagged.</li>
-          <li><b>No keys anywhere.</b> Foundry jurors answer to an Entra sign-in, Claude Opus 5.5 to the Claude Code sign-in.</li>
+          <li><b>No AI keys.</b> Foundry jurors answer to an Entra sign-in, Claude Opus 5.5 to the Claude Code sign-in.</li>
         </ul>
       </div>
       <figure class="panel scoreboard" aria-labelledby="board-cap">
@@ -469,7 +469,7 @@
           <thead><tr><th scope="col">What</th><th scope="col">Kept where</th><th scope="col">Who can read it</th></tr></thead>
           <tbody>
             <tr><th scope="row">Code you upload or share with an AI app</th><td>Nowhere — deleted the moment the audit ends</td><td><span class="who-none">Nobody</span></td></tr>
-            <tr><th scope="row">The result of a private audit</th><td>Encrypted with AES-256-GCM; the key never leaves your browser or AI app</td><td><span class="who-you">Only you</span> — not even Justify</td></tr>
+            <tr><th scope="row">The result of a private audit</th><td>Encrypted with AES-256-GCM under a key made in your browser (or handed to your AI app); the server holds it only while the audit runs and never stores it</td><td><span class="who-you">Only you</span> — not even Justify</td></tr>
             <tr><th scope="row">Audits of public repositories</th><td>Cached by commit</td><td>Anyone with the link — it is public code</td></tr>
             <tr><th scope="row">Your history and dashboard numbers</th><td>Our database: repository names, counts and ratios — never code or file names</td><td>You, and the service that shows it to you</td></tr>
             <tr><th scope="row">Your account</th><td>A display name; a GitHub username and picture. No email, no password, no GitHub key</td><td>You, and the service</td></tr>
