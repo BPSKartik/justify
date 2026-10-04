@@ -8,6 +8,8 @@ thing the language itself guarantees about each: how far it can be seen.
     file      only this file can use it: an import, a private method, a static C function,
               a JavaScript function nobody exports
     package   only files next to it can: an unexported Go function
+    repo      anything in this repository could, nothing outside it: a CSS class, a private
+              Rust function — searched for everywhere, and a removal candidate if never found
     public    anything could: an exported function, a public class — another project may
               call it, so it is never removed from here, only flagged for judgement
 
@@ -58,7 +60,7 @@ class Unit:
     name: str                      # the word searched for
     start: int                     # the unit's own text, which never counts as a use of it
     end: int
-    scope: str                     # file, package or public
+    scope: str                     # file, package, repo or public
     cut: tuple[int, int] | None = None   # what a removal deletes, when it is not (start, end)
     keep: str = ""                 # a reason it must not be removed even if unused → judgement
     reason: str = ""               # overrides the core's reason
@@ -76,6 +78,8 @@ class Source:
     errors: int = 0
     units: list[Unit] = field(default_factory=list)
     pack: object = None
+    index: object = None            # the repository's word index, for packs that must look wider
+    sources: list = field(default_factory=list)    # every parsed file, same reason
 
 
 def parser_for(lang: str, rel: str):
@@ -224,6 +228,7 @@ def audit(root: pathlib.Path, census: list, texts: dict[str, str] | None = None)
     for rel_text in (texts or {}):                       # files outside the census still hold words
         if rel_text not in index.ident:
             index.add(rel_text, texts[rel_text])
+    _index_the_rest(root, index)                         # templates, Razor, XAML, configs: uses too
 
     findings: list[Finding] = []
     langs: Counter = Counter()
@@ -232,6 +237,7 @@ def audit(root: pathlib.Path, census: list, texts: dict[str, str] | None = None)
         if src.errors:
             note["unparsed"].append(src.rel)       # a file the grammar cannot read cleanly is not judged
             continue
+        src.index, src.sources = index, sources
         try:
             src.units = src.pack.units(src)
         except Exception as exc:                     # noqa: BLE001 — one odd file never stops an audit
@@ -248,6 +254,38 @@ def audit(root: pathlib.Path, census: list, texts: dict[str, str] | None = None)
     return findings, note
 
 
+TEXT_LIMIT = 2_000_000         # bytes per file read only for its words
+TEXT_FILES_MAX = 20_000
+
+
+def _index_the_rest(root: pathlib.Path, index: Index) -> None:
+    """Every other text file in the repository — templates, Razor and XAML views, configs, docs —
+    is a place a name can be used, even if Justify does not audit its language."""
+    from ..ingest import BINARY_SUFFIXES, inside
+    from ..polyglot import _skip
+    seen = 0
+    for path in root.rglob("*"):
+        if seen >= TEXT_FILES_MAX:
+            break
+        try:
+            parts = path.relative_to(root).parts
+        except ValueError:
+            continue
+        rel = "/".join(parts)
+        if rel in index.ident or _skip(parts) or path.suffix.lower() in BINARY_SUFFIXES:
+            continue
+        try:
+            if not path.is_file() or not inside(root, path) or path.stat().st_size > TEXT_LIMIT:
+                continue
+            raw = path.read_bytes()
+        except OSError:
+            continue
+        if b"\0" in raw[:4096]:
+            continue
+        index.add(rel, raw.decode("utf-8", errors="replace"))
+        seen += 1
+
+
 def _decide(src: Source, u: Unit, sources: list[Source], index: Index) -> Finding | None:
     word = u.name
     own = index.count(src.rel, word, u.tokens) - _inside(src, u, word, u.tokens)
@@ -262,6 +300,10 @@ def _decide(src: Source, u: Unit, sources: list[Source], index: Index) -> Findin
         if any(index.count(r, word, u.tokens) for r in mates):
             return None
         where = "anywhere in its package"
+    elif u.scope == "repo":                          # anything here could use it, nothing outside
+        if own > 0 or (index.files_with(word, u.tokens) - {src.rel}):
+            return None
+        where = "anywhere in the repository"
     else:                                            # public: any file could use it
         if src.pack.entry(src.rel):
             return None
