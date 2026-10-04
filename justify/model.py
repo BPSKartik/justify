@@ -12,7 +12,10 @@ REMOVE = "REMOVE"            # no use found; still has to pass the proof
 AMBIGUOUS = "AMBIGUOUS"      # the graph cannot settle it; needs judgement
 SIMPLIFY = "SIMPLIFY"        # used, but duplicates something that exists
 
-KINDS = ("import", "function", "class", "dependency", "duplicate")
+KINDS = ("import", "function", "class", "method", "field", "variable", "type", "style", "dependency",
+         "duplicate")
+# what a removal can be: code that is cut out, then proved
+CODE_KINDS = ("import", "function", "class", "method", "field", "variable", "type", "style")
 
 
 @dataclass

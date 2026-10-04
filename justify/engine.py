@@ -10,14 +10,14 @@ import pathlib
 from dataclasses import dataclass, field
 from typing import Any
 
-from . import polyglot
+from . import langs, polyglot
 from .attribution import Attribution
 from .candidates import find_candidates
 from .facts import repo_facts
 from .ingest import ingest
 from .judge import judge
 from .llm import Jury, Model, usage_of
-from .model import KEEP, REMOVE, SIMPLIFY, Finding
+from .model import CODE_KINDS, KEEP, REMOVE, SIMPLIFY, Finding
 from .proof import prove
 
 
@@ -78,7 +78,7 @@ def _is_py(f: Finding) -> bool:
 
 def _payoff(findings: list[Finding], total_lines: int, att: Attribution, files: list[str],
             code_files: list[str] | None = None) -> dict[str, Any]:
-    dead = [f for f in findings if f.final == REMOVE and f.kind in ("import", "function", "class")]
+    dead = [f for f in findings if f.final == REMOVE and f.kind in CODE_KINDS]
     proved = [f for f in dead if f.proof == "passed"]
     dead_lines = sum(f.lines for f in dead)
     pending = [f for f in findings if f.verdict == "AMBIGUOUS" and not f.judgement and f.final == KEEP]
@@ -139,13 +139,13 @@ def _files_detail(files_all: list, findings: list[Finding], att: Attribution) ->
     dead: dict[str, int] = {}
     dup: dict[str, int] = {}
     for f in findings:
-        if f.final == REMOVE and f.kind in ("import", "function", "class"):
+        if f.final == REMOVE and f.kind in CODE_KINDS:
             dead[f.file] = dead.get(f.file, 0) + f.lines
         elif f.final == SIMPLIFY:
             dup[f.file] = dup.get(f.file, 0) + f.lines
     rows = []
     for c in files_all:
-        if c.lang != "Python" and c.lang not in polyglot.COPY_LANGS:
+        if c.lang != "Python" and c.lang not in polyglot.COPY_LANGS and c.lang not in langs.full_languages():
             continue
         row = {"path": c.rel, "lang": c.lang, "lines": c.lines, "dead": dead.get(c.rel, 0), "dup": dup.get(c.rel, 0)}
         if att.enabled and c.rel in att._blame:
@@ -182,19 +182,26 @@ def run(root: str | pathlib.Path, *, model: Model | None = None, prove_command: 
     if copy_note["files"]:
         stage("copies", f"{len(other)} copied blocks across {copy_note['files']} files in other languages",
               findings=len(findings) + len(other))
+    # every other language a pack can read: its imports, functions, classes, styles
+    more, lang_note = langs.audit(root, files_all)
+    for f in more:
+        f.final = REMOVE if f.verdict == REMOVE else KEEP
+    if lang_note["files"]:
+        stage("languages", f"{len(more)} findings in {lang_note['files']} files of "
+              f"{', '.join(lang_note['languages'])}", findings=len(findings) + len(other) + len(more))
     for f in findings:                    # a test's own helpers cannot be proved by running it
         ff = rf.files.get(f.file)
         if ff is not None and ff.is_test and f.kind != "import" and f.proof == "not run":
             f.proof = "not provable (test code)"
     att = Attribution(root)
     code_rels = [c.rel for c in files_all if c.lang in polyglot.COPY_LANGS or c.lang == "Python"]
-    blame = [s.rel for s in sources] + sorted({f.file for f in other})
+    blame = [s.rel for s in sources] + sorted({f.file for f in other + more})
     if len(code_rels) <= BLAME_ALL_UP_TO:
         blame += code_rels
     att.prefetch(list(dict.fromkeys(blame)))  # every Python file is blamed for the AI/human counts anyway
     stage("attribution", "every line traced: an AI-signed commit, or no AI trace" if att.enabled
           else "not a git repository: authorship skipped")
-    for f in findings + other:
+    for f in findings + other + more:
         f.authored_by = att.span(f.file, f.line, f.end_line) if f.kind != "dependency" else "n/a"
     reused = 0
     if model is not None and record:
@@ -225,22 +232,35 @@ def run(root: str | pathlib.Path, *, model: Model | None = None, prove_command: 
                         and f.proof == "not run":
                     f.final = REMOVE
                     grade_only.append(f)
-        proof = prove(root, findings, prove_command)
+        proof = prove(root, findings + more, prove_command)
         for f in grade_only:
             f.final = KEEP
         if grade_only:
             proof["proved_for_grading_only"] = len(grade_only)
-        for f in findings:                # asked for proof: only a removal that passed may go
-            if f.final == REMOVE and f.kind in ("import", "function", "class") and f.proof != "passed":
+        for f in findings + more:         # asked for proof: only a removal that passed may go
+            if f.final == REMOVE and f.kind in CODE_KINDS and f.proof != "passed":
                 f.final = KEEP
         stage("proof", f"{proof.get('passed', 0)} of {proof.get('candidates', 0)} removals proved")
         if model is not None:
             judging["scoreboard"] = scoreboard(findings)
 
-    findings = sorted(findings + other, key=lambda f: (f.file, f.line, f.name))
+    py_findings = findings
+    findings = sorted(findings + other + more, key=lambda f: (f.file, f.line, f.name))
     py_files = [s.rel for s in sources]
-    metrics = _payoff(findings, rf.total_lines, att, py_files, code_rels)
+    lang_files = sorted({c.rel for c in files_all if c.lang in set(lang_note.get("languages", []))})
+    metrics = _payoff(findings, rf.total_lines + lang_note["lines"], att, py_files + lang_files, code_rels)
     metrics["other_languages"] = copy_note
+    # the same ratio for Python alone, so a Python-only measurement keeps its meaning
+    py_dead = sum(f.lines for f in py_findings if f.final == REMOVE and f.kind in CODE_KINDS)
+    metrics["python_jlr_percent"] = (round(100.0 * (rf.total_lines - py_dead) / rf.total_lines, 2)
+                                     if rf.total_lines else None)
+    metrics["audited"] = {"python_files": len(sources), "python_lines": rf.total_lines,
+                          "languages": (["Python"] if sources else []) + lang_note.get("languages", []),
+                          "other_files": lang_note["files"], "other_lines": lang_note["lines"],
+                          "lines_by_language": {**({"Python": rf.total_lines} if sources else {}),
+                                                **lang_note.get("lines_by_language", {})},
+                          "unparsed": lang_note.get("unparsed", [])[:50],
+                          "tree_sitter": lang_note["available"]}
     stage("metrics", f"Justified Line Ratio {metrics['jlr_percent']}%" if metrics["jlr_percent"] is not None
           else "no Python to audit for dead code; census and copies done")
     res = Result(root=str(root), started=started, files=len(sources), lines=rf.total_lines,

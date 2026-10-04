@@ -64,7 +64,9 @@ def test_a_copied_block_is_reported_once_at_the_later_place(tmp_path):
     assert [(f.file, f.evidence[0]) for f in found] == [("src/b.js", "src/a.js:2")]
     assert found[0].final == "SIMPLIFY" and found[0].lines >= 6
     langs = {l["name"]: l for l in polyglot.summary(files)}
-    assert langs["JavaScript"]["files"] == 3 and langs["JavaScript"]["audit"] == "copies"
+    from justify import langs as packs
+    assert langs["JavaScript"]["files"] == 3
+    assert langs["JavaScript"]["audit"] == ("full" if packs.AVAILABLE else "copies")
     assert langs["Markdown"]["audit"] == "prose" and note["files"] == 3
 
 
@@ -78,7 +80,10 @@ def test_short_or_trivial_repeats_are_not_copies(tmp_path):
 def test_a_repository_without_python_still_gets_an_audit(tmp_path):
     _write(tmp_path, {"lib/a.ts": BODY, "lib/b.ts": BODY, "notes.md": "hi\n"})
     res = run(tmp_path, record=False)
-    assert res.files == 0 and res.metrics["jlr_percent"] is None
+    from justify import langs as packs
+    # with the language packs, TypeScript is audited too: its shared function is used in the other file
+    assert res.files == 0
+    assert res.metrics["jlr_percent"] == (100.0 if packs.AVAILABLE else None)
     assert res.metrics["duplicate_lines"] > 0
     assert [l["name"] for l in res.languages] == ["TypeScript", "Markdown"]
     assert {r["path"] for r in res.files_detail} == {"lib/a.ts", "lib/b.ts"}

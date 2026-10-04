@@ -129,8 +129,10 @@ def summary(files: list[CodeFile]) -> list[dict]:
         row = by.setdefault(f.lang, {"name": f.lang, "files": 0, "lines": 0})
         row["files"] += 1
         row["lines"] += f.lines
+    from . import langs
+    full = langs.full_languages()
     for row in by.values():
-        row["audit"] = ("full" if row["name"] == "Python" else
+        row["audit"] = ("full" if row["name"] == "Python" or row["name"] in full else
                         "copies" if row["name"] in COPY_LANGS else
                         "prose" if row["name"] in PROSE else "data" if row["name"] in DATA else "none")
     return sorted(by.values(), key=lambda r: (-r["lines"], r["name"]))
