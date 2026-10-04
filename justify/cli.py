@@ -31,6 +31,11 @@ def _print_summary(res) -> None:
         j = res.judging
         print(f"  Stage 4-5  {j['model']}: judged {j['judged']}, {j['calls']} calls, "
               f"vetoed {j['vetoed_static_removals']} static removal(s)" + (f", errors: {j['errors'][0]}" if j["errors"] else ""))
+        for name, u in (j.get("usage") or {}).items():
+            if u.get("input_tokens") or u.get("output_tokens"):
+                cached = u.get("cache_read_tokens", 0) + u.get("cache_write_tokens", 0)
+                print(f"  Tokens     {name}: {u['calls']} calls, {u.get('input_tokens', 0):,} in"
+                      + (f" (+{cached:,} cached)" if cached else "") + f", {u.get('output_tokens', 0):,} out")
         board = j.get("scoreboard")
         if board:
             print("  Scoreboard  the tests graded each juror: " + "   ".join(

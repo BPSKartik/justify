@@ -288,3 +288,30 @@ def test_anthropic_messages_transport(monkeypatch):
                         "model": "claude-opus-5-5"}
     finally:
         srv.shutdown()
+
+
+def test_every_model_call_counts_its_tokens(monkeypatch):
+    """The jury's cost is measured from these counts, so each transport must record them."""
+    import json as _json
+    from justify import llm
+
+    chat = llm._HttpChat("http://x/chat/completions", {}, "Phi-4", "Phi-4")
+    monkeypatch.setattr(chat, "_post", lambda body: {"choices": [{"message": {"content": '{"verdict": "keep"}'}}],
+                                                     "usage": {"prompt_tokens": 120, "completion_tokens": 30}})
+    chat.ask("s", "u")
+    chat.ask("s", "u")
+    assert chat.usage == {"calls": 2, "input_tokens": 240, "output_tokens": 60}
+
+    class _Done:
+        returncode, stderr = 0, ""
+        stdout = _json.dumps({"result": '{"verdict": "keep"}', "total_cost_usd": 0.0123,
+                              "usage": {"input_tokens": 9, "output_tokens": 40, "cache_read_input_tokens": 1000,
+                                        "cache_creation_input_tokens": 500}})
+    monkeypatch.setattr(llm.subprocess, "run", lambda *a, **k: _Done())
+    cli = llm.ClaudeCli("claude", "claude-opus-5-5")
+    cli.ask("s", "u")
+    assert cli.usage == {"calls": 1, "input_tokens": 9, "output_tokens": 40, "cache_write_tokens": 500,
+                         "cache_read_tokens": 1000, "api_equivalent_usd": 0.0123}
+
+    jury = llm.Jury([chat, cli], chat)                  # the challenger is also a member: counted once
+    assert llm.usage_of(jury) == {"Phi-4": chat.usage, "claude-opus-5-5": cli.usage}
