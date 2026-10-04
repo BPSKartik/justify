@@ -31,7 +31,7 @@ runs:
         python-version: ${{ inputs.python-version }}
     - name: Install Justify
       shell: bash
-      run: pip install --quiet "${{ github.action_path }}"
+      run: pip install --quiet "${{ github.action_path }}[languages]"
     - name: Install the project
       if: inputs.install-command != ''
       shell: bash

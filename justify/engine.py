@@ -187,7 +187,7 @@ def run(root: str | pathlib.Path, *, model: Model | None = None, prove_command: 
     for f in more:
         f.final = REMOVE if f.verdict == REMOVE else KEEP
     if lang_note["files"]:
-        stage("languages", f"{len(more)} findings in {lang_note['files']} files of "
+        stage("copies", f"{len(more)} findings in {lang_note['files']} files of "
               f"{', '.join(lang_note['languages'])}", findings=len(findings) + len(other) + len(more))
     for f in findings:                    # a test's own helpers cannot be proved by running it
         ff = rf.files.get(f.file)

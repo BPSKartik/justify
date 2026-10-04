@@ -98,7 +98,10 @@ def compact(scan: dict, base_url: str) -> dict:
         "languages": [{"language": l["name"], "files": l["files"], "lines": l["lines"], "audited_for": l["audit"]}
                       for l in (res.get("languages") or [])[:8]],
         "python_files": res.get("files"), "python_lines": res.get("lines"),
+        "audited_for_dead_code": (m.get("audited") or {}).get("lines_by_language")
+                                 or ({"Python": res.get("lines")} if res.get("files") else {}),
         "justified_line_ratio_percent": m.get("jlr_percent"),
+        "python_justified_line_ratio_percent": m.get("python_jlr_percent"),
         "dead_weight_lines": m.get("dead_weight_lines"), "dead_weight_per_1000_lines": m.get("per_1000_lines"),
         "duplicate_lines": m.get("duplicate_lines"),
         "counts": counts,
@@ -120,8 +123,8 @@ def compact(scan: dict, base_url: str) -> dict:
                 "never means 'written by a person'.",
     })
     if m.get("jlr_percent") is None:
-        out["note"] = ("No Python here, so there is no dead-code audit; other languages were checked for copied blocks. "
-                       + out["note"])
+        out["note"] = ("Nothing here is in a language Justify audits for dead code; every language was checked for "
+                       "copied blocks. " + out["note"])
     if hist.get("thin"):
         out["authorship_caveat"] = (f"One commit wrote {hist['largest_commit_percent']}% of the lines that exist "
                                     "today, so the history cannot show how this code was written.")

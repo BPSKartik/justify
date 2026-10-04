@@ -17,5 +17,5 @@ jobs:
       - uses: ./
         with:
           python-version: "3.12"
-          install-command: pip install ".[mcp,hosted,dev]"
+          install-command: pip install ".[mcp,hosted,dev,languages]"
           test-command: python -m pytest -q
