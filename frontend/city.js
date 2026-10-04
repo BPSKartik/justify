@@ -12,19 +12,19 @@ import {
   ACESFilmicToneMapping, BoxGeometry, Color, DirectionalLight, EdgesGeometry, Fog, HemisphereLight, InstancedMesh,
   LineBasicMaterial, LineSegments, Mesh, MeshBasicMaterial, MeshStandardMaterial, Object3D, PCFShadowMap,
   PerspectiveCamera, PlaneGeometry, Raycaster, Scene, SRGBColorSpace, Vector2, Vector3, WebGLRenderer,
-  AdditiveBlending, DoubleSide,
+  DoubleSide,
 } from "three";
 
 export const COLORS = {
-  ground: 0x0a1424, plate: [0x0f1f36, 0x132744, 0x173052, 0x1b3860],
-  body: 0x5b7aa3, notrace: 0x4a74ad, ai: 0x9070e6, dead: 0xff6b5e, dup: 0xf5b83d, hover: 0xffffff,
+  ground: 0xf1f1f3, plate: [0xe3e3e7, 0xd8d8dd, 0xcdcdd4, 0xc2c2ca],
+  body: 0xb3b3bb, notrace: 0x98a2b4, ai: 0x7a5cff, dead: 0xef5641, dup: 0xf0a82c, hover: 0x0a0a0a,
 };
 const LANG_COLORS = {
   Python: 0x4f8fdb, TypeScript: 0x3fbfb4, JavaScript: 0xe6c547, Go: 0x5cc8dc, Rust: 0xdc875c, Java: 0xcf7a4f,
   Kotlin: 0xa97bff, C: 0x9fb0c6, "C/C++ header": 0x8597ad, "C++": 0xd0708c, "C#": 0x72c477, Ruby: 0xe0505f,
   PHP: 0x9384d0, Swift: 0xf08a4b, Shell: 0x86c06c, Dart: 0x4ec3e0, Vue: 0x4fc08d, Svelte: 0xff6a3d,
 };
-export const langColor = (lang) => LANG_COLORS[lang] ?? 0x7189a8;
+export const langColor = (lang) => LANG_COLORS[lang] ?? 0x8b93a1;
 
 const WHITE = new Color(0xffffff);
 const ease = (t) => 1 - Math.pow(1 - Math.min(1, Math.max(0, t)), 3);
@@ -186,13 +186,13 @@ export function mountCity(host, files, opts = {}) {
 
   const { side, plates, towers } = layout(files);
   const scene = new Scene();
-  scene.fog = new Fog(0x0c1a2f, side * 1.9, side * 4.2);
+  scene.fog = new Fog(0xf3f3f5, side * 1.9, side * 4.2);
   const camera = new PerspectiveCamera(32, 1, 0.1, side * 10);
-  scene.add(new HemisphereLight(0xcfe0ff, 0x0a1424, 0.85));
-  const rim = new DirectionalLight(0x7fc4ff, 0.9);           // a cool light from behind outlines the skyline
+  scene.add(new HemisphereLight(0xffffff, 0xd6d6dc, 1.15));
+  const rim = new DirectionalLight(0xffffff, 0.55);          // a soft light from behind outlines the skyline
   rim.position.set(-side * 0.8, side * 0.5, -side * 0.9);
   scene.add(rim);
-  const sun = new DirectionalLight(0xfff2e2, 2.6);
+  const sun = new DirectionalLight(0xffffff, 2.3);
   sun.position.set(side * 0.6, side * 1.1, side * 0.35);
   sun.castShadow = o.shadows;
   if (o.shadows) {
@@ -278,13 +278,13 @@ export function mountCity(host, files, opts = {}) {
   const outline = new LineSegments(new EdgesGeometry(box), new LineBasicMaterial({ color: COLORS.hover, transparent: true, opacity: 0.95 }));
   outline.visible = false;
   scene.add(outline);
-  // the scanner: a thin line of light crossing the city, with a faint sheet above it
+  // the scanner: a thin coral line crossing the city, with a faint sheet above it
   const beam = new Object3D();
-  const line = new Mesh(new BoxGeometry(1, 1, 1), new MeshBasicMaterial({ color: 0x8fd0ff, toneMapped: false }));
+  const line = new Mesh(new BoxGeometry(1, 1, 1), new MeshBasicMaterial({ color: 0xdc4a36, toneMapped: false }));
   line.scale.set(side * 0.006, 0.08, side * 1.02);
   line.position.y = 0.2;
-  const sheet = new Mesh(new PlaneGeometry(1, 1), new MeshBasicMaterial({ color: 0x6fb8ff, transparent: true, opacity: 0.07,
-    blending: AdditiveBlending, depthWrite: false, side: DoubleSide }));
+  const sheet = new Mesh(new PlaneGeometry(1, 1), new MeshBasicMaterial({ color: 0xdc4a36, transparent: true, opacity: 0.045,
+    depthWrite: false, side: DoubleSide }));
   sheet.scale.set(side * 1.02, side * 0.1, 1);
   sheet.rotation.y = Math.PI / 2;
   sheet.position.y = side * 0.05;

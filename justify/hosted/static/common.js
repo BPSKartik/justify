@@ -228,7 +228,7 @@
     Kotlin: "#a97bff", C: "#9fb0c6", "C/C++ header": "#8597ad", "C++": "#d0708c", "C#": "#72c477", Ruby: "#e0505f", PHP: "#9384d0",
     Swift: "#f08a4b", Shell: "#86c06c", Dart: "#4ec3e0", Vue: "#4fc08d", Svelte: "#ff6a3d", Markdown: "#55667c", JSON: "#6b7f99",
     YAML: "#7d8fa8", HTML: "#e37b5b", CSS: "#5b8fe3", "Jupyter notebook": "#f0a64b" };
-  const langColor = (name) => LANG[name] || "#7189a8";
+  const langColor = (name) => LANG[name] || "#8b93a1";
 
   window.Justify = { vault, unseal, saveFile, githubRepos, langColor, plural, $, el, svg, fmt, compact, short, ago, toast, copy, api, loadConfig, loadMe, renderAuth, avatar, signOut,
     city, cityTip, webglOK, get me() { return me; }, get csrf() { return csrf; } };
