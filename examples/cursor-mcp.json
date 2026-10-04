@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "justify-web": {
+      "url": "https://justify.xeta.in/mcp"
+    },
+    "justify": {
+      "command": "justify-mcp",
+      "env": { "JUSTIFY_TEST_COMMAND": "python -m pytest -q" }
+    }
+  }
+}

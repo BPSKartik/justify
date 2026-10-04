@@ -119,6 +119,31 @@ class Model:
     def ask(self, system: str, user: str) -> dict:
         raise NotImplementedError
 
+    def tally(self, **tokens: int | float) -> None:
+        """Add one call's token counts (and, where the provider reports it, its dollar cost)."""
+        u = self.__dict__.setdefault("usage", {"calls": 0})
+        u["calls"] += 1
+        for k, v in tokens.items():
+            if isinstance(v, (int, float)) and v:
+                u[k] = round(u.get(k, 0) + v, 6)
+
+
+def usage_of(model: Model | None) -> dict[str, dict]:
+    """Tokens used per model name, across a jury's members and its challenger."""
+    if model is None:
+        return {}
+    parts = [*model.members, model.challenger] if isinstance(model, Jury) else [model]
+    out: dict[str, dict] = {}
+    seen: set[int] = set()
+    for m in parts:
+        if id(m) in seen or not getattr(m, "usage", None):
+            continue
+        seen.add(id(m))
+        mine = out.setdefault(m.name, {})
+        for k, v in m.usage.items():
+            mine[k] = round(mine.get(k, 0) + v, 6)
+    return out
+
 
 class _HttpChat(Model):
     """An OpenAI-style chat endpoint. Models differ in what they accept — GPT-5 refuses a
@@ -186,6 +211,11 @@ class _HttpChat(Model):
         else:
             raise ModelError(f"{self.name}: gave up after repeated rate limits")
         self.seconds = round(time.monotonic() - start, 1)
+        u = data.get("usage") if isinstance(data, dict) else None
+        if isinstance(u, dict):
+            self.tally(input_tokens=u.get("prompt_tokens") or 0, output_tokens=u.get("completion_tokens") or 0)
+        else:
+            self.tally()
         try:
             return _extract_json(data["choices"][0]["message"]["content"])
         except (KeyError, IndexError, TypeError) as exc:
@@ -267,7 +297,14 @@ class ClaudeCli(Model):
             raise ModelError(f"{self.name}: {said or r.stderr[-200:] or 'exit ' + str(r.returncode)} — "
                              f"sign in once with `{self.binary}` then /login, or configure another provider")
         if isinstance(envelope, dict):
+            u = envelope.get("usage") or {}
+            # Claude Code reports what the call would cost at API prices; on a subscription it is not billed
+            self.tally(input_tokens=u.get("input_tokens") or 0, output_tokens=u.get("output_tokens") or 0,
+                       cache_write_tokens=u.get("cache_creation_input_tokens") or 0,
+                       cache_read_tokens=u.get("cache_read_input_tokens") or 0,
+                       api_equivalent_usd=envelope.get("total_cost_usd") or 0)
             return _extract_json(envelope.get("result", ""))
+        self.tally()
         return _extract_json(r.stdout)
 
 
@@ -314,6 +351,10 @@ class _Anthropic(Model):
         else:
             raise ModelError(f"{self.name}: gave up after repeated rate limits")
         self.seconds = round(time.monotonic() - start, 1)
+        u = data.get("usage") or {}
+        self.tally(input_tokens=u.get("input_tokens") or 0, output_tokens=u.get("output_tokens") or 0,
+                   cache_write_tokens=u.get("cache_creation_input_tokens") or 0,
+                   cache_read_tokens=u.get("cache_read_input_tokens") or 0)
         text = "".join(b.get("text", "") for b in data.get("content", []) if isinstance(b, dict) and b.get("type") == "text")
         return _extract_json(text)
 

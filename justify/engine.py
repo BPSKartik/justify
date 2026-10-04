@@ -16,7 +16,7 @@ from .candidates import find_candidates
 from .facts import repo_facts
 from .ingest import ingest
 from .judge import judge
-from .llm import Jury, Model
+from .llm import Jury, Model, usage_of
 from .model import KEEP, REMOVE, SIMPLIFY, Finding
 from .proof import prove
 
@@ -210,6 +210,7 @@ def run(root: str | pathlib.Path, *, model: Model | None = None, prove_command: 
     pending = [f for f in findings if not (f.judgement or {}).get("reused_from_last_run")]
     judging = judge(rf, pending, model, limit=judge_limit, progress=progress)   # stages 4-5
     judging["reused_from_last_run"] = reused
+    judging["usage"] = usage_of(model)                 # tokens per model: what the jury cost, measured
     if model is not None:
         stage("judge", f"{judging.get('judged', 0)} units judged by {model.name}")
 
