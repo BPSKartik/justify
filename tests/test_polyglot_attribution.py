@@ -113,3 +113,14 @@ def test_history_that_is_not_utf8_does_not_stop_an_audit(tmp_path):
         subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True, env=env)
     res = run(tmp_path, record=False)
     assert any(f.name == "json" for f in res.findings)
+
+
+def test_every_package_is_installed():
+    """A sub-package missing from pyproject's list works from a checkout and breaks every real install
+    (the GitHub Action, the hosted image) — it happened once with justify.langs."""
+    import re
+    root = pathlib.Path(__file__).resolve().parent.parent
+    listed = set(re.findall(r'"(justify(?:\.\w+)*)"', re.search(r"packages = \[([^\]]*)\]",
+                                                               (root / "pyproject.toml").read_text()).group(1)))
+    found = {".".join(p.parent.relative_to(root).parts) for p in (root / "justify").rglob("__init__.py")}
+    assert found <= listed, f"not in pyproject packages: {sorted(found - listed)}"

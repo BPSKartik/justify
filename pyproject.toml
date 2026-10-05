@@ -33,7 +33,7 @@ justify = "justify.cli:main"
 justify-mcp = "justify.mcp_server:main"
 
 [tool.setuptools]
-packages = ["justify", "justify.hosted"]
+packages = ["justify", "justify.hosted", "justify.langs"]
 
 [tool.setuptools.package-data]
 "justify.hosted" = ["static/*"]
