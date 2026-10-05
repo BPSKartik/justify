@@ -14,13 +14,17 @@ Kept for judgement, whatever the count says:
     generate accessors from private fields or read them directly;
   - a native method, implemented outside Java;
   - a field whose initializer runs code (`= startServer()`, `= counter++`): dropping the field
-    would drop the call;
-  - an instance field of a class that implements Serializable (its serialized form), or of any
-    class in a repository that serializes objects by reflection — Gson, Jackson, JPA, Moshi and
-    the rest read private fields nobody names;
+    would drop the call. `List.of(...)`, `Pattern.compile(...)` and their kind are pure only on the
+    JDK or Guava class itself: a project's own `Registry.of("x")` may register something;
+  - an instance field of a class that implements Serializable, extends an exception or declares a
+    serialVersionUID (its serialized form), or of any class in a repository that serializes
+    objects by reflection — Gson, Jackson, JPA, Moshi and the rest read private fields nobody
+    names, whether a file imports them, reaches them through an adapter (Retrofit's Gson
+    converter) or only a build file names them;
   - a name that appears in another file's string literal (getDeclaredMethod("x"),
     ReflectionTestUtils.setField(o, "x", v)), or in a file Justify does not parse — XML, YAML,
-    ProGuard rules, JNI C code, Groovy tests — any of which can reach a private member by name.
+    ProGuard rules, JNI C code, Groovy tests — any of which can reach a private member by name,
+    a nested class by its binary name `Outer$Inner` included.
 
 Never units: constructors, and the names Java serialization calls by itself (serialVersionUID,
 readObject, writeReplace and the rest).
@@ -50,12 +54,26 @@ MEMBERS = {"method_declaration": "method", "field_declaration": "field", "class_
            "annotation_type_declaration": "class"}
 ANNOTATIONS = {"marker_annotation", "annotation"}
 
-# What an initializer may call or construct and still do nothing but build its value.
-PURE_CALLS = {"getLogger", "getLog", "getAnonymousLogger", "compile", "quote", "asList", "of", "ofEntries",
-              "copyOf", "valueOf", "emptyList", "emptyMap", "emptySet", "singletonList", "singleton",
-              "singletonMap", "unmodifiableList", "unmodifiableMap", "unmodifiableSet",
-              "unmodifiableCollection", "synchronizedList", "synchronizedMap", "ofPattern", "ofNanos",
-              "ofMillis", "ofSeconds", "ofMinutes", "ofHours", "ofDays"}
+# What an initializer may call or construct and still do nothing but build its value. A logger
+# factory is pure whatever its receiver; the other names only on the JDK or Guava classes listed,
+# since a project's own `Registry.of("x")` or `Metrics.compile()` may register something.
+PURE_CALLS = {"getLogger", "getLog", "getAnonymousLogger"}
+_COLLECTIONS = {"List", "Set", "Map", "EnumSet", "Stream", "IntStream", "LongStream", "DoubleStream", "Optional",
+                "Arrays", "ImmutableList", "ImmutableSet", "ImmutableMap", "ImmutableSortedSet",
+                "ImmutableSortedMap", "ImmutableMultimap", "ImmutableListMultimap", "ImmutableSetMultimap",
+                "Lists", "Sets", "Maps"}
+_TIME = {"Duration", "Period"}
+_BOXES = {"String", "Integer", "Long", "Short", "Byte", "Double", "Float", "Boolean", "Character", "BigDecimal",
+          "BigInteger"}
+PURE_QUALIFIED = {
+    "compile": {"Pattern"}, "quote": {"Pattern", "Matcher"}, "asList": {"Arrays"},
+    "of": _COLLECTIONS | _TIME, "ofEntries": {"Map"}, "copyOf": _COLLECTIONS, "valueOf": _BOXES,
+    "ofPattern": {"DateTimeFormatter"},
+    **{n: {"Collections"} for n in ("emptyList", "emptyMap", "emptySet", "singletonList", "singleton",
+                                     "singletonMap", "unmodifiableList", "unmodifiableMap", "unmodifiableSet",
+                                     "unmodifiableCollection", "synchronizedList", "synchronizedMap")},
+    **{n: _TIME for n in ("ofNanos", "ofMillis", "ofSeconds", "ofMinutes", "ofHours", "ofDays")},
+}
 PURE_TYPES = {"Object", "String", "StringBuilder", "StringBuffer", "ArrayList", "LinkedList", "HashMap",
               "LinkedHashMap", "TreeMap", "HashSet", "LinkedHashSet", "TreeSet", "ArrayDeque", "PriorityQueue",
               "ConcurrentHashMap", "ConcurrentLinkedQueue", "ConcurrentLinkedDeque", "ConcurrentSkipListMap",
@@ -76,8 +94,16 @@ REFLECTIVE = re.compile(
     rb"|com\.google\.cloud\.firestore|androidx\.room|android\.arch\.persistence|io\.realm|com\.esotericsoftware"
     rb"|org\.apache\.commons\.lang3?\.builder|kotlinx\.serialization|org\.yaml\.snakeyaml|org\.modelmapper"
     rb"|ma\.glasnost|org\.dozer|com\.github\.dozermapper|org\.apache\.avro|io\.protostuff|com\.jsoniter"
-    rb"|com\.owlike\.genson|flexjson|net\.sf\.json)\b"
+    rb"|com\.owlike\.genson|flexjson|net\.sf\.json"
+    # ...or reaches one through an adapter: retrofit2.converter.gson, io.ktor.serialization.gson,
+    # Spring's GsonHttpMessageConverter.
+    rb"|[\w.]*\.(?i:gson|moshi|jackson|fastjson|xstream|kryo)\w*)\b"
     rb"|\b(getDeclaredFields|declaredFields|declaredMemberProperties|memberProperties)\b", re.M)
+# A serializer the repository depends on (a build file names it) though no file imports it.
+SERIALIZERS = ("gson", "Gson", "moshi", "Moshi", "fastjson", "xstream", "XStream", "kryo", "Kryo")
+# A class that says it is serialized: its interfaces, or a superclass that is an exception.
+SERIALIZABLE = re.compile(rb"\b(Serializable|Externalizable)\b")
+THROWABLE = re.compile(rb"(Exception|Error|Throwable)\b")
 # Short string literals with no spaces in them: where a name handed to reflection lives.
 STRING = re.compile(rb"\"([^\"\s\\]{1,200})\"|'([^'\s\\]{2,200})'")
 # Files whose words reach no code: prose, licences, build and CI settings (ProGuard rules do).
@@ -103,7 +129,7 @@ class Words:
 class Repo:
     """What the rest of the repository says about private names; built once per audit."""
 
-    def __init__(self, sources: list[Source]):
+    def __init__(self, sources: list[Source], index=None):
         self.parsed = {s.rel for s in sources}
         self.strings: dict[bytes, set[str]] = {}
         self.reflective = ""
@@ -113,6 +139,15 @@ class Repo:
                     self.strings.setdefault(w, set()).add(s.rel)
             if not self.reflective and REFLECTIVE.search(s.data):
                 self.reflective = s.rel
+        if not self.reflective and index is not None:
+            self.reflective = next((rel for w in SERIALIZERS for rel in sorted(index.files_with(w))), "")
+        # The core's words keep `$` inside them, so `Outer$Inner` in an XML or ProGuard file, the
+        # binary name configuration uses for a nested class, is no use of `Inner` to it.
+        self.joined: dict[str, set[str]] = {}
+        for word, files in (getattr(index, "where", None) or {}).items():
+            if "$" in word:
+                for part in WORD.findall(word.encode()):
+                    self.joined.setdefault(part.decode(), set()).update(files)
 
     def elsewhere(self, src: Source, name: str) -> str:
         """Another file that could reach `name` by spelling it: a string literal in parsed code, or
@@ -120,7 +155,7 @@ class Repo:
         found = sorted(self.strings.get(name.encode(), set()) - {src.rel})
         if found:
             return found[0]
-        return next((rel for rel in sorted(src.index.files_with(name))
+        return next((rel for rel in sorted(src.index.files_with(name) | self.joined.get(name, set()))
                      if rel != src.rel and rel not in self.parsed
                      and ("proguard" in rel.lower() or not NOT_A_USE.search(rel))), "")
 
@@ -134,7 +169,7 @@ def repo_of(src: Source) -> Repo | None:
         return None
     repo = _REPOS.get(src.index)
     if repo is None:
-        repo = _REPOS[src.index] = Repo(src.sources)
+        repo = _REPOS[src.index] = Repo(src.sources, src.index)
     return repo
 
 
@@ -184,10 +219,29 @@ def runs_code(node, pure: set[str], skip: set[str]) -> bool:
             return True
         if n.type in ("postfix_expression", "prefix_expression") and any(c.type in ("++", "--") for c in n.children):
             return True
-        if (n.type in CALLS or n.type == "call_expression") and callee(n) not in pure:
+        if (n.type in CALLS or n.type == "call_expression") and not _pure_call(n, pure):
             return True
         stack.extend(n.children)
     return False
+
+
+def _pure_call(node, pure: set[str]) -> bool:
+    name = callee(node)
+    if node.type == "object_creation_expression" or name not in PURE_QUALIFIED:
+        return name in pure
+    return receiver(node) in PURE_QUALIFIED[name]
+
+
+def receiver(node) -> str:
+    """The simple name of what a call is made on (`java.util.List` in `java.util.List.of()`), or ''."""
+    if node.type == "method_invocation":
+        target = node.child_by_field_name("object")
+    else:                                                # Kotlin: `a.b.of(...)` is a navigation
+        nav = node.named_children[0] if node.named_children else None
+        target = nav.named_children[0] if nav is not None and nav.type == "navigation_expression" \
+            and nav.named_children else None
+    names = WORD.findall(target.text.split(b"<")[0]) if target is not None else []
+    return names[-1].decode() if names else ""
 
 
 def callee(node) -> str:
@@ -300,9 +354,18 @@ def _annotated(owner) -> bool:
 
 
 def _serializable(src: Source, owner) -> bool:
+    """Whether the class says it is serialized: it implements Serializable, extends a Throwable
+    (every exception is Serializable), or declares a serialVersionUID."""
     sup = owner.child_by_field_name("interfaces")
-    return sup is not None and bool(re.search(rb"\b(Serializable|Externalizable)\b",
-                                              src.data[sup.start_byte:sup.end_byte]))
+    if sup is not None and SERIALIZABLE.search(src.data[sup.start_byte:sup.end_byte]):
+        return True
+    parent = owner.child_by_field_name("superclass")
+    if parent is not None and THROWABLE.search(src.data[parent.start_byte:parent.end_byte]):
+        return True
+    body = owner.child_by_field_name("body")
+    return body is not None and any(
+        c.type == "field_declaration" and b"serialVersionUID" in src.data[c.start_byte:c.end_byte]
+        for c in body.named_children)
 
 
 def _txt(src: Source, node) -> str:

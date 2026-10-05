@@ -6,7 +6,9 @@ JavaScript and TypeScript, JSX and TSX (React).
                binds nothing and is never touched: it is there for its side effect. For the same
                reason, cutting the last binding of a JavaScript import or require keeps the load
                (`import 'x'`, `require('x')`) unless the module is one of Node's own; TypeScript drops
-               an import nobody uses when it compiles, so there the whole statement goes.
+               an import nobody uses when it compiles, so there the whole statement goes — and when
+               every binding in its list is unused, all of them go with it, leaving no `import 'x'`
+               that would load what was never loaded before.
   function / class / type
                a top-level declaration. Exported: anything could use it — judged, never removed.
 
@@ -19,8 +21,14 @@ How far a top-level name reaches depends on what the file is:
 
 Kept, whatever the count says: the JSX factory in a file with JSX — `React`, `h`, a `@jsx` pragma's
 name, or a name a Babel, TypeScript or bundler config gives as its pragma — since the transform calls
-it without the file naming it; a decorated class (the decorator may register it) or one with a static
-block (it runs when the class is defined); every name in a file that calls eval; a statement whose
+it without the file naming it; a class that runs code when it is defined — a decorator anywhere in it
+(it may register the class or its members), a static block, a static field, computed member name or
+extends clause that calls something — and an enum with a member computed by a call; a destructured
+require beside a rest pattern (the rest would collect it) or with a default that calls something; an
+import whose going could leave the file with no import or export, since it would turn into a script
+whose names are globals (and, in TypeScript, whose `declare module` stops augmenting), or that a
+project which keeps every import's load (verbatimModuleSyntax and the like) may want for its side
+effect; every name in a file that calls eval; a statement whose
 removal would join the lines around it under automatic semicolon insertion; default exports; every
 export of a file a framework or tool calls by its place — pages, routes, configs, tests, stories,
 entry files. `.d.ts` files only describe other code and are not judged. A name the word index cannot
@@ -30,6 +38,7 @@ see (non-ASCII) is never named.
 from __future__ import annotations
 
 import re
+from collections import Counter
 
 from . import IDENT, Pack, Source, Unit, walk, whole_lines
 
@@ -47,6 +56,8 @@ PRAGMA = re.compile(r"@jsx(?:Frag)?\s+([A-Za-z_$][\w$]*)")
 # words a Babel, SWC, esbuild or TypeScript config names its JSX factory with
 FACTORY_WORDS = ("pragma", "pragmaFrag", "jsxPragma", "jsxPragmaFrag", "jsxFactory", "jsxFragmentFactory",
                  "jsxFragment", "jsxInject")
+# config words under which TypeScript or Babel keeps an import's load even when nothing it binds is used
+VERBATIM_WORDS = ("verbatimModuleSyntax", "preserveValueImports", "importsNotUsedAsValues", "onlyRemoveTypeImports")
 MODULE_SUFFIX = (".mjs", ".cjs", ".mts", ".cts")
 UMD = re.compile(r"\btypeof\s+(?:module|exports|define|require)\b|\bdefine\.amd\b|^\s*define\s*\(", re.M)
 CJS_EXPORT = re.compile(r"^\s*(?:module\.exports|exports)\s*[.\[=]|\bObject\.(?:defineProperty|assign)\(\s*(?:module\.)?exports\b")
@@ -76,10 +87,12 @@ class JsPack(Pack):
         root = src.tree.root_node
         seen = _seen(src, root)
         reach = _reach(src, root, seen)
+        counts = Counter(IDENT.findall(src.text))           # the same words the core counts
+        stays = _stays_module(src, root, counts)
         out: list[Unit] = []
         for stmt in root.named_children:
             if stmt.type == "import_statement":
-                out += self._imports(src, stmt, seen)
+                out += self._imports(src, stmt, seen, counts, stays)
             elif stmt.type in ("lexical_declaration", "variable_declaration"):
                 out += self._requires(src, stmt, reach)
                 out += self._declarations(src, stmt, reach, cut_node=stmt)
@@ -98,33 +111,30 @@ class JsPack(Pack):
         return out
 
     # ---------------------------------------------------------------- imports
-    def _imports(self, src: Source, stmt, seen: set[str]) -> list[Unit]:
+    def _imports(self, src: Source, stmt, seen: set[str], counts: Counter, stays: bool) -> list[Unit]:
         clause = next((c for c in stmt.named_children if c.type == "import_clause"), None)
         if clause is None:
             return []                                    # `import 'x'`: a side effect, never a binding
-        bindings = []                                    # (name node, the cut that removes it from the list)
-        for c in clause.named_children:
-            if c.type == "identifier":                   # default import
-                bindings.append((c, _item(src, c)))
-            elif c.type == "namespace_import":
-                ident = next((x for x in c.named_children if x.type == "identifier"), None)
-                if ident is not None:
-                    bindings.append((ident, _item(src, c)))
-            elif c.type == "named_imports":
-                for spec in c.named_children:
-                    if spec.type != "import_specifier":
-                        continue
-                    name = spec.child_by_field_name("alias") or spec.child_by_field_name("name")
-                    if name is not None:
-                        bindings.append((name, _item(src, spec)))
+        bindings = _bindings(src, clause)
         source = stmt.child_by_field_name("source")
         type_only = any(c.type == "type" for c in stmt.children)
+        builtin = source is not None and _builtin(_module(src, source))
+        # after the cut, nothing would load: TypeScript drops an import nobody uses when it compiles
+        drops = src.lang == "TypeScript" or type_only or source is None or builtin
+        names = [_txt(src, n) for n, _ in bindings]
+        pragmas = set(PRAGMA.findall(src.text))
+        named_factory = any(n in pragmas or ("jsx" in seen and n in ("React", "h")) for n in names)
+        # every binding unused: the statement goes whole, or TypeScript would be left loading a module
+        # (`import {} from 'x'` → `import 'x'`) that it never loaded before. Decided without the word
+        # index, so that proving a removal (which has none) cuts exactly what the audit judged.
+        together = len(bindings) > 1 and drops and not named_factory and all(
+            counts[n] - _words(src, stmt).count(n) == 0 for n in names)
         out = []
-        for name_node, cut in bindings:
-            name = _txt(src, name_node)
+        for (name_node, cut), name in zip(bindings, names):
             keep = ""
-            if len(bindings) == 1:
-                if src.lang == "TypeScript" or type_only or source is None or _builtin(_module(src, source)):
+            whole = len(bindings) == 1 or together
+            if whole:
+                if drops:
                     cut, keep = _statement(src, stmt)
                 else:
                     cut = (clause.start_byte, source.start_byte)      # `import x from 'y'` → `import 'y'`
@@ -132,6 +142,14 @@ class JsPack(Pack):
                      cut=cut, keep=keep)
             if _factory(src, name, seen):
                 u.keep = "JSX in this file may need it in scope without naming it (the classic JSX transform)"
+            elif together and any(_factory(src, other, seen) for other in names if other != name):
+                u.keep = "another name in this import may be the JSX factory, and the import would go whole"
+            elif whole and drops and not stays:
+                u.keep = ("the file may have no other import or export, and without one it is no longer a module: "
+                          "its names would become globals")
+            elif whole and drops and src.lang == "TypeScript" and not (type_only or builtin) and _verbatim(src):
+                u.keep = ("the project keeps every import's load (verbatimModuleSyntax or the like), so the "
+                          "module may be loaded for a side effect")
             out.append(u)
         return out
 
@@ -165,11 +183,16 @@ class JsPack(Pack):
                             scope=reach, cut=cut, keep=keep))
         elif target.type == "object_pattern":
             items = [p for p in target.named_children if p.type != "comment"]
+            rest = any(p.type == "rest_pattern" for p in items)
             for p in items:
                 ident = _pattern_name(p)
                 if ident is None:
                     continue
                 cut, keep = lone() if len(items) == 1 else (_item(src, p), "")
+                if rest:
+                    keep = "the rest pattern beside it would collect it instead"
+                elif p.type == "object_assignment_pattern" and _effect(p.child_by_field_name("right")):
+                    keep = "its default value runs code"
                 out.append(Unit(kind="import", name=_txt(src, ident), start=stmt.start_byte, end=stmt.end_byte,
                                 scope=reach, cut=cut, keep=keep))
         return out
@@ -198,6 +221,8 @@ class JsPack(Pack):
         cut, keep = _statement(src, cut_node) if scope != "public" else ((cut_node.start_byte, cut_node.end_byte), "")
         if kind == "class":
             keep = _class_keep(body) or keep
+        elif node.type == "enum_declaration" and _effect(node.child_by_field_name("body")):
+            keep = "a member's value is computed by code that runs when the enum is defined"
         return [Unit(kind=kind, name=_txt(src, name), start=cut_node.start_byte, end=cut_node.end_byte,
                      scope=scope, cut=cut, keep=keep)]
 
@@ -246,12 +271,88 @@ def _factory(src: Source, name: str, seen: set[str]) -> bool:
 
 def _class_keep(node) -> str:
     """A reason a class is more than its name: something runs when it is defined."""
-    if any(c.type == "decorator" for c in node.children):
-        return "a decorator may register it — frameworks find classes that way"
+    if any(n.type == "decorator" for n in walk(node)):
+        return "a decorator may register it — frameworks find classes, and their members, that way"
+    if any(c.type == "class_heritage" and _effect(c) for c in node.children):
+        return "its extends clause runs code when the class is defined"
     body = node.child_by_field_name("body")
-    if body is not None and any(c.type == "class_static_block" for c in body.named_children):
-        return "its static block runs when the class is defined"
+    for m in (body.named_children if body is not None else []):
+        if m.type == "class_static_block":
+            return "its static block runs when the class is defined"
+        if any(c.type == "computed_property_name" and _effect(c) for c in m.children):
+            return "a computed member name runs code when the class is defined"
+        if m.type in ("field_definition", "public_field_definition") and any(c.type == "static" for c in m.children) \
+                and _effect(m):
+            return "a static field's value runs code when the class is defined"
     return ""
+
+
+EFFECTS = {"call_expression", "new_expression", "assignment_expression", "augmented_assignment_expression",
+           "update_expression", "await_expression", "yield_expression"}
+LAZY = {"arrow_function", "function_expression", "function", "generator_function", "method_definition",
+        "statement_block", "class_body"}
+
+
+def _effect(node) -> bool:
+    """Whether evaluating this node may run code — a call, `new`, an assignment, `delete` — leaving out
+    function bodies, which only run when called."""
+    stack = [node] if node is not None else []
+    while stack:
+        n = stack.pop()
+        if n.type in EFFECTS or (n.type == "unary_expression" and n.children and n.children[0].type == "delete"):
+            return True
+        if n is not node and n.type in LAZY:
+            continue
+        stack.extend(n.children)
+    return False
+
+
+def _bindings(src: Source, clause) -> list:
+    """An import's bindings: (name node, the cut that removes it from the list)."""
+    bindings = []
+    for c in clause.named_children:
+        if c.type == "identifier":                       # default import
+            bindings.append((c, _item(src, c)))
+        elif c.type == "namespace_import":
+            ident = next((x for x in c.named_children if x.type == "identifier"), None)
+            if ident is not None:
+                bindings.append((ident, _item(src, c)))
+        elif c.type == "named_imports":
+            for spec in c.named_children:
+                if spec.type != "import_specifier":
+                    continue
+                name = spec.child_by_field_name("alias") or spec.child_by_field_name("name")
+                if name is not None:
+                    bindings.append((name, _item(src, spec)))
+    return bindings
+
+
+def _stays_module(src: Source, root, counts: Counter) -> bool:
+    """Whether the file stays a module whatever unused imports are cut: it has an export, a bare
+    `import 'x'`, an import with a binding something uses, or a suffix that makes it one."""
+    if src.rel.endswith(MODULE_SUFFIX):
+        return True
+    for n in root.named_children:
+        if n.type == "export_statement":
+            return True
+        if n.type == "import_statement":
+            clause = next((c for c in n.named_children if c.type == "import_clause"), None)
+            if clause is None:
+                return True
+            names = [_txt(src, b) for b, _ in _bindings(src, clause)]
+            inside = Counter(_words(src, n))
+            if not names or any(counts[w] > inside[w] for w in names):
+                return True
+    return False
+
+
+def _verbatim(src: Source) -> bool:
+    """Whether the project tells TypeScript (or Babel) to keep the load of every import it writes."""
+    return src.index is not None and any(src.index.files_with(w) for w in VERBATIM_WORDS)
+
+
+def _words(src: Source, node) -> list[str]:
+    return IDENT.findall(_txt(src, node))
 
 
 def _statement(src: Source, stmt) -> tuple[tuple[int, int], str]:

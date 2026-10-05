@@ -245,7 +245,7 @@ class _Runner:
         env["PYTHONPATH"] = os.pathsep.join(paths + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else []))
         env.setdefault("PYTHONDONTWRITEBYTECODE", "1")
         p = subprocess.Popen(self.command, shell=True, cwd=self.copy_root, stdout=subprocess.PIPE,
-                             stderr=subprocess.STDOUT, text=True, env=env, start_new_session=True)
+                             stderr=subprocess.STDOUT, text=True, errors="replace", env=env, start_new_session=True)
         try:
             out, _ = p.communicate(timeout=self.timeout)
         except subprocess.TimeoutExpired:

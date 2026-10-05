@@ -14,12 +14,17 @@ C#.
 
 Kept for judgement, whatever the count says: anything with an attribute; extern, partial,
 virtual, override and abstract members and explicit interface implementations; names a runtime
-calls by convention (Main, Dispose, Unity messages such as Update or OnTriggerEnter,
-ShouldSerializeX/ResetX, ASP.NET's Page_Load); a struct's instance fields (its memory layout) and
+calls by convention (Main, Dispose, Unity messages such as Update or OnTriggerEnter, editor and
+asset-processor messages, On<Action> for an action in a .inputactions file, ShouldSerializeX/ResetX,
+ASP.NET's Page_Load, CreateHostBuilder, PropertyChanged.Fody's On<Property>Changed); names the compiler
+calls by pattern without spelling them (GetEnumerator, Deconstruct, GetAwaiter, a sealed record's
+PrintMembers; Add, Count or Select where an initializer, an index or a query in the file calls them);
+an alias `using XAttribute = ...` that `[X]` uses; a struct's instance fields (its memory layout) and
 the fields of a type whose attribute may read them ([Serializable], [StructLayout]); fields whose
 initializer does work (`new Timer(Tick, ...)`); nested types that derive from something or hold
 attributed members (assembly scanning finds them); every private member of a file that looks up
-non-public members at run time (BindingFlags.NonPublic, SendMessage); and any name that another
+non-public members at run time (BindingFlags.NonPublic, SendMessage); any name that a file using
+[UnsafeAccessor] also names; and any name that another
 file could reach by name — a string in other C#, or any mention in markup, scenes and configs.
 Generated files (*.Designer.cs, *.g.cs) are not judged.
 """
@@ -63,10 +68,31 @@ UNITY = {"Awake", "Start", "Update", "FixedUpdate", "LateUpdate", "OnEnable", "O
          "OnPlayerConnected", "OnPlayerDisconnected", "OnFailedToConnect", "OnLevelWasLoaded",
          "OnNetworkInstantiate", "OnSerializeNetworkView", "OnSceneGUI", "OnInspectorUpdate", "OnHierarchyChange",
          "OnProjectChange", "OnSelectionChange", "OnFocus", "OnLostFocus", "OnWizardCreate", "OnWizardUpdate",
-         "OnWizardOtherButton", "CreateGUI", "OnPreviewGUI", "OnPreviewSettings", "OnHeaderGUI"}
+         "OnWizardOtherButton", "CreateGUI", "OnPreviewGUI", "OnPreviewSettings", "OnHeaderGUI",
+         # editor windows and editors, and AssetModificationProcessor's static messages
+         "ShowButton", "OnAddedAsTab", "OnBeforeRemovedAsTab", "OnTabDetached", "OnMainWindowMove",
+         "OnBackingScaleFactorChanged", "OnDidOpenScene", "ModifierKeysChanged", "HasFrameBounds",
+         "OnGetFrameBounds", "OnSceneDrag", "OnPreSceneGUI", "IsOpenForEdit", "CanOpenForEdit", "MakeEditable",
+         "FileModeChanged", "OnStatusUpdated"}
 UNITY_FAMILY = re.compile(r"^(On(Trigger|Collision)(Enter|Stay|Exit)(2D)?|OnMouse\w*|On(Pre|Post)process\w*"
-                          r"|OnAssign\w*)$")
+                          r"|OnAssign\w*|OnWill\w*|OnGenerated\w*|OnPreGenerating\w*)$")
+# members the compiler calls by pattern, never spelling the name where it calls them: foreach, await,
+# deconstruction, `fixed`, `await using`, and a sealed record's ToString and Equals
+PATTERN = {"GetEnumerator", "GetAsyncEnumerator", "MoveNext", "MoveNextAsync", "Current", "Deconstruct",
+           "GetAwaiter", "GetResult", "IsCompleted", "OnCompleted", "UnsafeOnCompleted", "GetPinnableReference",
+           "DisposeAsync", "PrintMembers", "EqualityContract"}
+# ... and these where the file holds the syntax that calls them: collection initializers and
+# expressions call Add, `^i` and `a..b` call Length or Count and Slice, query expressions call LINQ's names
+PATTERN_SYNTAX = {"Add": ("initializer_expression", "collection_expression"),
+                  **dict.fromkeys(("Length", "Count", "Slice"), ("range_expression", "^")),
+                  **dict.fromkeys(("Select", "SelectMany", "Where", "Join", "GroupJoin", "OrderBy",
+                                   "OrderByDescending", "ThenBy", "ThenByDescending", "GroupBy", "Cast"),
+                                  ("query_expression",))}
 ASPNET = re.compile(r"^(Page|Application|Session)_[A-Z]\w*$")       # AutoEventWireup and Global.asax
+# found on the Program class by name, non-public too, by EF Core's and ASP.NET's design-time tools
+HOST_BUILDERS = {"CreateHostBuilder", "CreateWebHostBuilder", "BuildWebHost"}
+# PropertyChanged.Fody weaves calls to On{Property}Changed into the property's setter
+ON_CHANGED = re.compile(r"^On(\w+?)Chang(ed|ing)$")
 # words that show a file looking members up by name at run time, private ones included
 REFLECTION = ("NonPublic", "DeclaredMethods", "DeclaredFields", "DeclaredProperties", "DeclaredMembers",
               "DeclaredNestedTypes", "GetDeclaredMethod", "GetDeclaredMethods", "GetDeclaredField",
@@ -96,7 +122,7 @@ class CSharpPack(Pack):
         out: list[Unit] = []
         for node in _top(src.tree.root_node):
             if node.type == "using_directive":
-                out += _alias(src, node)
+                out += _alias(f, node)
             else:
                 self._members(f, node, out)
         return out
@@ -150,7 +176,7 @@ class CSharpPack(Pack):
         if name is None:
             return None
         u = Unit(kind="method", name=name, start=_start(f.src, m), end=m.end_byte, scope=t.scope)
-        u.keep = _member_keep(f, m, mods) or _called_by_name(f, name)
+        u.keep = _member_keep(f, m, mods) or _called_by_name(f, name) or _by_pattern(f, name)
         return f.finish(u)
 
     def _property(self, f: _File, t: _Type, m, mods: set[str]) -> Unit | None:
@@ -165,7 +191,7 @@ class CSharpPack(Pack):
             any(a.type == "accessor_declaration" and a.child_by_field_name("body") is None
                 for a in accessors.named_children) or "field" in IDENT.findall(_txt(f.src, accessors))))
         u.keep = (_member_keep(f, m, mods) or (stores and "static" not in mods and t.layout)
-                  or (_works(initial) if initial is not None else ""))
+                  or (_works(initial) if initial is not None else "") or _by_pattern(f, name))
         return f.finish(u)
 
     def _fields(self, f: _File, t: _Type, m, mods: set[str]) -> list[Unit]:
@@ -196,6 +222,17 @@ class _File:
         self.src = src
         self.words = Counter(IDENT.findall(src.text))
         self.reflects = next((w for w in REFLECTION if self.words[w]), "")
+        self._syntax: set[str] | None = None
+
+    def has(self, kind: str) -> bool:
+        """Whether the file holds a node of this type (or `^`, an index from the end)."""
+        if self._syntax is None:
+            self._syntax = set()
+            for n in walk(self.src.tree.root_node):
+                self._syntax.add(n.type)
+                if n.type == "prefix_unary_expression" and n.child_count and n.children[0].type == "^":
+                    self._syntax.add("^")
+        return kind in self._syntax
 
     def own(self, u: Unit) -> int:
         chunk = self.src.data[u.start:u.end].decode("utf-8", errors="replace")
@@ -227,6 +264,8 @@ class _File:
                 continue
             if not low.endswith(".cs"):
                 return f"{rel} names it, and markup, scenes and configs can reach a member by name"
+            if index.count(rel, "UnsafeAccessor"):
+                return f"{rel} uses [UnsafeAccessor], which reaches a private member by its name"
             words = _strings_of(self.src, rel)
             if words is None:
                 return f"{rel}, a file Justify does not parse, names it"
@@ -265,6 +304,10 @@ def _member_keep(f: _File, m, mods: set[str]) -> str:
 def _called_by_name(f: _File, name: str) -> str:
     if name in UNITY or UNITY_FAMILY.match(name):
         return f"Unity calls {name} by name"
+    index = f.src.index
+    if name.startswith("On") and len(name) > 2 and index is not None and any(
+            rel.lower().endswith(".inputactions") for rel in index.files_with(name[2:])):
+        return f"Unity's PlayerInput sends On{name[2:]} for the {name[2:]} input action, by name"
     if name == "Main":
         return "it may be the program's entry point"
     if name == "Dispose":
@@ -273,6 +316,19 @@ def _called_by_name(f: _File, name: str) -> str:
         return "the WinForms designer and Json.NET call ShouldSerializeX and ResetX by name"
     if ASPNET.match(name):
         return f"ASP.NET wires {name} up by name"
+    if name in HOST_BUILDERS:
+        return f"design-time tools find {name} on the Program class by name"
+    changed = ON_CHANGED.match(name)
+    if changed and f.words[changed.group(1)]:
+        return f"PropertyChanged.Fody calls {name} by name when {changed.group(1)} changes"
+    return ""
+
+
+def _by_pattern(f: _File, name: str) -> str:
+    if name in PATTERN:
+        return f"the compiler calls {name} by pattern, without naming it"
+    if any(f.has(k) for k in PATTERN_SYNTAX.get(name, ())):
+        return f"the compiler calls {name} by pattern (an initializer, an index or range, a query) without naming it"
     return ""
 
 
@@ -291,14 +347,18 @@ def _works(node) -> str:
     return ""
 
 
-def _alias(src: Source, node) -> list[Unit]:
+def _alias(f: _File, node) -> list[Unit]:
     """`using X = Some.Type;` binds a name for this file alone."""
+    src = f.src
     if any(c.type in ("global", "static") for c in node.children) or not any(c.type == "=" for c in node.children):
         return []
     name = _name(src, node.child_by_field_name("name"))
     if name is None:
         return []
-    return [Unit(kind="import", name=name, start=node.start_byte, end=node.end_byte, scope="file")]
+    u = Unit(kind="import", name=name, start=node.start_byte, end=node.end_byte, scope="file")
+    if name.endswith("Attribute") and len(name) > 9 and f.words[name[:-9]]:
+        u.keep = f"[{name[:-9]}] names the {name} alias without its Attribute suffix"
+    return [u]
 
 
 def _top(node):

@@ -667,3 +667,179 @@ def test_a_member_sharing_its_line_is_not_cut(make_repo):
     [f] = findings(root, "Tight.cs")
     with pytest.raises(SharedLine):
         edit_source("Tight.cs", text, [f])
+
+
+# ---------------------------------------------------------------- hardening: names reached without being spelled
+
+def test_names_the_compiler_calls_by_pattern(make_repo):
+    root = make_repo({
+        "Bag.cs": """
+            using System.Collections.Generic;
+            using System.Linq;
+            using System.Runtime.CompilerServices;
+
+            public struct Bag
+            {
+                private IEnumerator<int> GetEnumerator() { yield return 1; }
+                private void Deconstruct(out int a, out int b) { a = 1; b = 2; }
+                private TaskAwaiter GetAwaiter() => default;
+                private void Add(int x) { }
+                private int Count => 1;
+                private Bag Select(System.Func<int, int> f) => this;
+                private void Dead() { }
+
+                public int Sum() { int s = 0; foreach (var x in this) s += x; var (a, b) = this; return s + a + b + this[^1]; }
+                public int this[int i] => i;
+                public async System.Threading.Tasks.Task Wait() { await this; }
+                public static Bag Make() => new Bag { 1, 2 };
+                public Bag Query() => from x in this select x;
+            }
+        """,
+        "Plain.cs": """
+            public class Plain
+            {
+                private void Add(int x) { }
+                private int Count => 0;
+                private void Select() { }
+                public int[] Items() => new int[3];
+            }
+        """,
+    })
+    found = audit(root)
+    assert found.pop(("Bag.cs", "Dead")) == ("method", R)
+    assert {n for (_, n), (_, v) in found.items() if v == A} == {
+        "GetEnumerator", "Deconstruct", "GetAwaiter", "Add", "Count", "Select"}
+    # without an initializer, an index or a query in the file, these are ordinary names
+    assert {n: v for (f, n), (_, v) in found.items() if f == "Plain.cs"} == {"Add": R, "Count": R, "Select": R}
+
+
+def test_a_sealed_records_print_members_and_equality_contract(make_repo):
+    root = make_repo({"Person.cs": """
+        using System.Text;
+
+        public sealed record Person(string Name)
+        {
+            private bool PrintMembers(StringBuilder b) { b.Append(Name); return true; }
+            private System.Type EqualityContract => typeof(Person);
+            private void Dead() { }
+        }
+    """})
+    assert audit(root) == {("Person.cs", "PrintMembers"): ("method", A),
+                           ("Person.cs", "EqualityContract"): ("field", A), ("Person.cs", "Dead"): ("method", R)}
+
+
+def test_unity_editor_and_asset_processor_messages(make_repo):
+    root = make_repo({"Editor/Hooks.cs": """
+        using UnityEditor;
+        using UnityEngine;
+
+        public class Hooks : AssetModificationProcessor
+        {
+            private static string[] OnWillSaveAssets(string[] paths) => paths;
+            private static AssetDeleteResult OnWillDeleteAsset(string p, RemoveAssetOptions o) => default;
+            private static string OnGeneratedCSProject(string path, string content) => content;
+            private void ShowButton(Rect r) { }
+            private bool HasFrameBounds() => true;
+            private void Dead() { }
+        }
+    """})
+    found = audit(root)
+    assert found.pop(("Editor/Hooks.cs", "Dead")) == ("method", R)
+    assert set(found.values()) == {("method", A)} and len(found) == 5
+
+
+def test_unity_input_actions_are_sent_as_on_messages(make_repo):
+    root = make_repo({
+        "Assets/Controls.inputactions": '{"maps": [{"name": "Player", "actions": [{"name": "Jump"}]}]}\n',
+        "Assets/Hero.cs": """
+            using UnityEngine;
+
+            public class Hero : MonoBehaviour
+            {
+                private void OnJump() { }
+                private void OnDash() { }
+            }
+        """,
+    })
+    assert audit(root) == {("Assets/Hero.cs", "OnJump"): ("method", A), ("Assets/Hero.cs", "OnDash"): ("method", R)}
+
+
+def test_an_attribute_alias_used_without_its_suffix(make_repo):
+    root = make_repo({"Dto.cs": """
+        using JsonAttribute = Newtonsoft.Json.JsonPropertyAttribute;
+        using GoneAttribute = System.ObsoleteAttribute;
+
+        public class Dto
+        {
+            [Json("x")] public int X;
+        }
+    """})
+    assert audit(root) == {("Dto.cs", "JsonAttribute"): ("import", A), ("Dto.cs", "GoneAttribute"): ("import", R)}
+
+
+def test_unsafe_accessor_in_another_file_reaches_a_private_member(make_repo):
+    root = make_repo({
+        "Calc.cs": """
+            public class Calc
+            {
+                private int Secret() => 42;
+                private int Dead() => 0;
+            }
+        """,
+        "Tests/Spy.cs": """
+            using System.Runtime.CompilerServices;
+
+            public static class Spy
+            {
+                [UnsafeAccessor(UnsafeAccessorKind.Method)]
+                public static extern int Secret(Calc c);
+            }
+        """,
+    })
+    assert audit(root) == {("Calc.cs", "Secret"): ("method", A), ("Calc.cs", "Dead"): ("method", R)}
+
+
+def test_host_builders_and_fody_change_handlers(make_repo):
+    root = make_repo({
+        "Program.cs": """
+            using Microsoft.Extensions.Hosting;
+
+            public class Program
+            {
+                private static IHostBuilder CreateHostBuilder(string[] args) => Host.CreateDefaultBuilder(args);
+                private static void Unused() { }
+            }
+        """,
+        "Person.cs": """
+            using System.ComponentModel;
+
+            public class Person : INotifyPropertyChanged
+            {
+                public event PropertyChangedEventHandler PropertyChanged;
+                public string Name { get; set; }
+                private void OnNameChanged() { }
+                private void OnAgeChanged() { }
+            }
+        """,
+    })
+    assert audit(root) == {("Program.cs", "CreateHostBuilder"): ("method", A), ("Program.cs", "Unused"): ("method", R),
+                           ("Person.cs", "OnNameChanged"): ("method", A), ("Person.cs", "OnAgeChanged"): ("method", R)}
+
+
+EDGES = ("public class Edges\r\n{\r\n    #region Helpers\r\n    /// <summary>Gone.</summary>\r\n"
+         "    private void Dead() { }\r\n    #endregion\r\n#if DEBUG\r\n    private int _debugOnly;\r\n#endif\r\n"
+         "    private static readonly int[] Table = { 1, 2 };\r\n    public void Live() { }\r\n}\r\n")
+
+
+def test_cuts_beside_regions_conditionals_and_crlf(make_repo):
+    root = make_repo({"Edges.cs": EDGES})
+    found = {f.name: f for f in findings(root, "Edges.cs")}
+    assert {n: (f.kind, f.verdict) for n, f in found.items()} == {
+        "Dead": ("method", R), "_debugOnly": ("field", R), "Table": ("field", R)}
+    for f in found.values():
+        out = edit_source("Edges.cs", EDGES, [f])
+        assert parses("Edges.cs", out) and "public void Live() { }\r\n" in out and f.name not in out
+    out = edit_source("Edges.cs", EDGES, list(found.values()))
+    assert parses("Edges.cs", out)
+    assert out == ("public class Edges\r\n{\r\n    #region Helpers\r\n    #endregion\r\n#if DEBUG\r\n#endif\r\n"
+                   "    public void Live() { }\r\n}\r\n")

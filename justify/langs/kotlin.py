@@ -17,11 +17,16 @@ Kept for judgement, whatever the count says:
   - an annotated function or property (@JvmStatic, @Inject, @Test, @JvmField...), and a property
     of an annotated class (@Serializable, @Entity, @Parcelize generate code from its fields);
   - an `external` function, implemented outside Kotlin;
+  - a property of a class that is Serializable, extends an exception or declares a
+    serialVersionUID: it is part of the serialized form;
   - a property whose initializer runs code (`= scope.launch { }`): dropping the property would
     drop the call — `by lazy { }` and the plain collection builders do not count;
   - the reflection and configuration cases the Java pack keeps: an instance property in a
     repository that serializes objects by reflection, a name in another file's string or in a file
     Justify does not parse.
+
+A property's getter and setter on the lines below it are its siblings in the tree; they are
+counted as part of it (an annotated accessor keeps it) and cut with it.
 
 Never units: `override` and `operator` functions, `main`, `expect`/`actual` declarations (the
 other half lives in another source set), backticked names, and Java serialization's own names.
@@ -29,9 +34,11 @@ other half lives in another source set), backticked names, and Java serializatio
 
 from __future__ import annotations
 
+import re
+
 from . import Pack, Source, Unit
-from .java import (NAME, PURE_CALLS, PURE_TYPES, SERIAL, Repo, Words, doc_start, member_cut, outside_keep,
-                   repo_of, runs_code)
+from .java import (NAME, PURE_CALLS, PURE_TYPES, SERIAL, Words, doc_start, member_cut, outside_keep, repo_of,
+                   runs_code)
 
 BODIES = {"class_body", "enum_class_body"}
 DECLS = {"function_declaration", "property_declaration"}
@@ -48,6 +55,8 @@ PURE = PURE_CALLS | PURE_TYPES | {
     "Any", "Mutex", "MutableStateFlow", "MutableSharedFlow", "MutableLiveData", "Channel", "SupervisorJob", "Job",
     "logger", "notNull", "observable", "vetoable"}
 NOT_RUN = {"lambda_literal", "anonymous_function"}
+ACCESSORS = {"getter", "setter"}
+SERIALIZABLE = re.compile(rb"\b(Serializable|Externalizable)\b|(Exception|Error|Throwable)\b")
 
 
 class KotlinPack(Pack):
@@ -110,11 +119,17 @@ def _declaration(src: Source, node, parent, words: Words, repo) -> list[Unit]:
         kind = "field" if member else "variable"
     name = _txt(src, ident) if ident is not None else ""
     start = doc_start(src.data, node, ("multiline_comment",))
-    if not NAME.match(name) or name in SERIAL or name == "main" or words.used(name, start, node.end_byte):
+    # A getter or setter on the lines below is the property's sibling in the tree, not its child:
+    # it goes with the property, or the cut would leave `get() = ...` behind on its own.
+    end, accessors = node.end_byte, []
+    nxt = node.next_named_sibling if node.type == "property_declaration" else None
+    while nxt is not None and nxt.type in ACCESSORS:
+        end, accessors, nxt = nxt.end_byte, accessors + [nxt], nxt.next_named_sibling
+    if not NAME.match(name) or name in SERIAL or name == "main" or words.used(name, start, end):
         return []
     owner = parent.parent if member else None
     keep = ""
-    if annotated:
+    if annotated or any(_annotated(src, a) for a in accessors):
         keep = "it is annotated: a framework or the compiler may call or read it by its name"
     elif "external" in flags:
         keep = "it is external: implemented outside Kotlin and bound by its name"
@@ -125,9 +140,11 @@ def _declaration(src: Source, node, parent, words: Words, repo) -> list[Unit]:
         if value is not None and runs_code(value, PURE, NOT_RUN):
             keep = "its initializer runs code, which still runs when nothing reads the property"
     instance = kind == "field" and owner is not None and owner.type == "class_declaration"
+    if not keep and instance and node.type == "property_declaration" and _serializable(src, owner):
+        keep = "a property of a Serializable class is part of its serialized form"
     keep = keep or outside_keep(src, repo, name, instance_field=instance)
-    return [Unit(kind=kind, name=name, start=start, end=node.end_byte, scope="file",
-                 cut=member_cut(src.data, start, node.end_byte), keep=keep)]
+    return [Unit(kind=kind, name=name, start=start, end=end, scope="file",
+                 cut=member_cut(src.data, start, end), keep=keep)]
 
 
 def _initializer(prop):
@@ -140,6 +157,14 @@ def _initializer(prop):
             return c
         seen_eq = seen_eq or c.type == "="
     return None
+
+
+def _serializable(src: Source, owner) -> bool:
+    """Whether the class says it is serialized: a Serializable or Throwable supertype, or a
+    serialVersionUID anywhere in it (its companion holds it)."""
+    supers = [c for c in owner.named_children if c.type == "delegation_specifier"]
+    return any(SERIALIZABLE.search(src.data[c.start_byte:c.end_byte]) for c in supers) \
+        or b"serialVersionUID" in src.data[owner.start_byte:owner.end_byte]
 
 
 def _annotated(src: Source, owner) -> bool:

@@ -100,3 +100,16 @@ def test_a_history_of_one_commit_is_called_thin_not_human(tmp_path):
     a = run(tmp_path, record=False).metrics["attribution"]
     assert a["history"]["thin"] and a["history"]["largest_commit_percent"] == 100.0
     assert a["tools"] == {} and a["all_code"] == {"ai_lines": 0, "human_lines": 3}
+
+
+def test_history_that_is_not_utf8_does_not_stop_an_audit(tmp_path):
+    """A commit written in Latin-1 (old projects have them) once crashed `git blame` decoding."""
+    import subprocess
+    env = {"GIT_AUTHOR_NAME": "J\xf6rg", "GIT_AUTHOR_EMAIL": "a@a", "GIT_COMMITTER_NAME": "a", "GIT_COMMITTER_EMAIL": "a@a",
+           "PATH": __import__("os").environ["PATH"]}
+    (tmp_path / "app.py").write_bytes(b"# caf\xe9 \xb0C\nimport json\nprint(1)\n")      # Latin-1 bytes in the file itself
+    for args in (["init", "-q"], ["config", "i18n.commitEncoding", "latin1"], ["add", "-A"],
+                 ["commit", "-qm", "temp \xb0C".encode("latin-1").decode("latin-1")]):
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True, env=env)
+    res = run(tmp_path, record=False)
+    assert any(f.name == "json" for f in res.findings)

@@ -14,12 +14,19 @@ from __future__ import annotations
 
 from . import Pack, Source, Unit, error_count
 from .css import judge, rules
-from .js import DECL
-from .js import PACK as JS
 
 JS_TYPES = {"", "text/javascript", "application/javascript", "application/ecmascript", "text/ecmascript",
             "module"}
 _PARSERS: dict = {}
+# an inline script's declarations, as js.py reads them in a file (copied: packs stand alone)
+DECL = {"function_declaration": "function", "generator_function_declaration": "function",
+        "class_declaration": "class"}
+FUNC_VALUES = {"arrow_function": "function", "function_expression": "function", "function": "function",
+               "generator_function": "function", "class": "class"}
+ASI_STARTS = tuple(b"([`+-/")
+ENDS_CLEANLY = {"import_statement", "function_declaration", "generator_function_declaration", "class_declaration",
+                "if_statement", "for_statement", "for_in_statement", "while_statement", "do_statement",
+                "try_statement", "switch_statement", "statement_block"}
 
 
 def _parse(grammar: str, data: bytes):
@@ -92,7 +99,7 @@ def _script(src: Source, data: bytes, base: int, module: bool) -> list[Unit]:
     out: list[Unit] = []
     for stmt in tree.root_node.named_children:
         if stmt.type in DECL or stmt.type in ("lexical_declaration", "variable_declaration"):
-            out += JS._declarations(part, stmt, scope="file" if module else "public", cut_node=stmt)
+            out += _declaration(part, stmt, scope="file" if module else "public")
     for u in out:
         u.start, u.end = u.start + base, u.end + base
         u.cut = (u.cut[0] + base, u.cut[1] + base) if u.cut else None
@@ -102,3 +109,55 @@ def _script(src: Source, data: bytes, base: int, module: bool) -> list[Unit]:
 
 
 PACK = HtmlPack()
+
+
+def _declaration(src: Source, node, scope: str) -> list[Unit]:
+    """A top-level function or class: `function f() {}`, `class C {}`, `const f = () => …`.
+    A `const` holding any other value may do something when it runs, and is never a unit."""
+    if node.type in DECL:
+        name = node.child_by_field_name("name")
+        if name is None:
+            return []
+        kind, body = DECL[node.type], node
+    else:
+        declarators = [d for d in node.named_children if d.type == "variable_declarator"]
+        if len(declarators) != 1:
+            return []                                    # `const a = …, b = …` is cut together or not at all
+        name = declarators[0].child_by_field_name("name")
+        body = declarators[0].child_by_field_name("value")
+        if name is None or body is None or name.type != "identifier":
+            return []
+        kind = FUNC_VALUES.get(body.type)
+        if kind is None:
+            return []
+    cut, keep = _statement(src, node) if scope != "public" else ((node.start_byte, node.end_byte), "")
+    if kind == "class":
+        keep = _class_keep(body) or keep
+    word = src.data[name.start_byte:name.end_byte].decode("utf-8", "replace")
+    return [Unit(kind=kind, name=word, start=node.start_byte, end=node.end_byte, scope=scope, cut=cut, keep=keep)]
+
+
+def _class_keep(node) -> str:
+    """A reason a class is more than its name: something runs when it is defined."""
+    if any(c.type == "decorator" for c in node.children):
+        return "a decorator may register it — frameworks find classes that way"
+    body = node.child_by_field_name("body")
+    if body is not None and any(c.type == "class_static_block" for c in body.named_children):
+        return "its static block runs when the class is defined"
+    return ""
+
+
+def _statement(src: Source, stmt) -> tuple[tuple[int, int], str]:
+    """The cut for a whole statement, and a reason to keep it when cutting would join its neighbours:
+    with no semicolon before it, a next line starting with ( [ ` + - / would continue the line above."""
+    cut = (stmt.start_byte, stmt.end_byte)
+    prev, nxt = stmt.prev_named_sibling, stmt.next_named_sibling
+    while prev is not None and prev.type == "comment":
+        prev = prev.prev_named_sibling
+    while nxt is not None and nxt.type == "comment":
+        nxt = nxt.next_named_sibling
+    if prev is None or nxt is None or src.data[nxt.start_byte] not in ASI_STARTS:
+        return cut, ""
+    if prev.type in ENDS_CLEANLY or src.data[prev.start_byte:prev.end_byte].rstrip().endswith(b";"):
+        return cut, ""
+    return cut, "cutting it would join the lines around it, which no semicolon separates"

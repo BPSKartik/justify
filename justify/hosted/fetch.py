@@ -99,7 +99,7 @@ def resolve(rr: RepoRef, timeout: int = 30, token: str | None = None) -> tuple[s
             GIT + ["ls-remote", "--", rr.clone_url, f"refs/heads/{rr.ref}", f"refs/tags/{rr.ref}",
                    f"refs/tags/{rr.ref}^{{}}"]
         try:
-            r = subprocess.run(args, capture_output=True, text=True, timeout=timeout, env=_env(home, token))
+            r = subprocess.run(args, capture_output=True, text=True, errors="replace", timeout=timeout, env=_env(home, token))
         except subprocess.TimeoutExpired:
             raise FetchError("GitHub did not answer in time. Try again in a minute.", 504, "timeout") from None
     if r.returncode != 0:
@@ -143,7 +143,7 @@ def clone(rr: RepoRef, branch: str, dest: str, timeout: int = 180, max_mb: int =
     if branch and branch != "HEAD":
         args += ["--branch", branch]
     args += ["--", rr.clone_url, dest]
-    p = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, env=_env(home, token),
+    p = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, errors="replace", env=_env(home, token),
                          start_new_session=True)
     start = time.monotonic()
     try:
@@ -161,7 +161,7 @@ def clone(rr: RepoRef, branch: str, dest: str, timeout: int = 180, max_mb: int =
             if "not found" in err.lower():
                 raise FetchError(f"{rr.slug} was not found, or it is private.", 404, "not_found")
             raise FetchError("GitHub refused the download. Try again in a minute.", 502, "clone_failed")
-        r = subprocess.run(["git", "-C", dest, "rev-parse", "HEAD"], capture_output=True, text=True,
+        r = subprocess.run(["git", "-C", dest, "rev-parse", "HEAD"], capture_output=True, text=True, errors="replace",
                            timeout=10, env=_env(home))
         return r.stdout.strip()
     finally:

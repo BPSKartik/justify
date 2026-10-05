@@ -254,15 +254,20 @@ def audit(root: pathlib.Path, census: list, texts: dict[str, str] | None = None)
     return findings, note
 
 
-TEXT_LIMIT = 2_000_000         # bytes per file read only for its words
+TEXT_LIMIT = 8_000_000         # bytes per file read only for its words (Unity scenes and prefabs run large)
 TEXT_FILES_MAX = 20_000
+# folders never read for words: tools' caches and other people's installed code. Build output and
+# vendored code ARE read — markup there can be the only place a class is used.
+INDEX_SKIP = {".git", ".hg", ".svn", "node_modules", "bower_components", ".venv", "venv", "env", "site-packages",
+              "__pycache__", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".tox", ".nox", ".eggs", ".justify",
+              ".next", ".nuxt", ".svelte-kit", ".turbo", ".cache", ".parcel-cache", ".gradle", "Pods", "DerivedData",
+              "target", "coverage"}
 
 
 def _index_the_rest(root: pathlib.Path, index: Index) -> None:
     """Every other text file in the repository — templates, Razor and XAML views, configs, docs —
     is a place a name can be used, even if Justify does not audit its language."""
     from ..ingest import BINARY_SUFFIXES, inside
-    from ..polyglot import _skip
     seen = 0
     for path in root.rglob("*"):
         if seen >= TEXT_FILES_MAX:
@@ -272,7 +277,8 @@ def _index_the_rest(root: pathlib.Path, index: Index) -> None:
         except ValueError:
             continue
         rel = "/".join(parts)
-        if rel in index.ident or _skip(parts) or path.suffix.lower() in BINARY_SUFFIXES:
+        if rel in index.ident or any(part in INDEX_SKIP or part.endswith(".egg-info") for part in parts[:-1]) \
+                or path.suffix.lower() in BINARY_SUFFIXES:
             continue
         try:
             if not path.is_file() or not inside(root, path) or path.stat().st_size > TEXT_LIMIT:

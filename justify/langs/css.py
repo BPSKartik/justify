@@ -14,23 +14,32 @@ found nowhere is a removal candidate. Kept for judgement, however unused:
     (fade-enter-active), and classes a library or platform adds from code that is not here
     (hljs-*, modal-backdrop, wp-*, …);
   - a name a script may build: its start up to a '-' or '_' ("btn-" + kind, `btn-${kind}`) or
-    its tail (`${size}-lg`) stands alone in a script, template or page;
+    its tail (`${size}-lg`, '%s-lg' % size) stands alone in a script, template or page; or a
+    script glues parts with the name's separator (['icon', n].join('-'), `${block}__${elem}`) and
+    holds its start as a string a few lines away — anywhere in a file using a BEM helper;
+  - a rule holding an @include or an at-rule other than @media-like ones and @apply: a mixin may
+    @at-root rules out of it; a CSS module's classes when a script reads it with a computed key
+    or hands the whole module on (<Child classes={styles}>);
   - the classes of a stylesheet whose markup is mostly elsewhere: no file names it, or fewer than
     half the classes it defines appear in any markup or script here — a theme's, a CMS's or a
     framework's markup, most likely;
   - custom properties a framework reads (--bs-*, --ifm-*, …), any when a script builds their
     names or a page loads a stylesheet from elsewhere, and a file's when most of them are read
-    nowhere here;
-  - everything on a platform that renders markup of its own (WordPress, Drupal, Ghost, Shopify);
+    nowhere here; keyframes, too, when a stylesheet from elsewhere is loaded (it may name them,
+    or a rule here may override its own);
+  - everything on a platform that renders markup of its own (WordPress, Drupal, Ghost, Shopify,
+    Sphinx, MkDocs);
   - a published package's stylesheets are its API: public, judged and never removed.
 
-Not units: selector lists, combinators, `&` and nested rules, %placeholders, mixin bodies,
+Not units: selector lists, combinators, `&` and nested rules, rules holding @keyframes or
+@at-root (those reach past the rule), %placeholders, mixin bodies,
 escaped or interpolated names, classes inside :not() and other pseudo-class arguments; files
 under vendor/, minified files, and a stylesheet that announces itself as a released library.
 """
 
 from __future__ import annotations
 
+import bisect
 import posixpath
 import re
 
@@ -43,13 +52,17 @@ SIMPLE = {"class_selector", "id_selector", "pseudo_class_selector", "pseudo_elem
           "attribute_selector"}
 GROUPS = {"media_statement", "supports_statement"}
 AT_GROUPS = {b"@layer", b"@container"}
+# at-rules inside a rule that only style that rule's elements
+INNER_AT = {b"@apply", b"@screen", b"@container", b"@layer", b"@media", b"@supports", b"@extend", b"@debug",
+            b"@warn", b"@error", b"@variants", b"@responsive"}
 
 STATE = {"active", "show", "open", "hidden", "hide", "disabled", "selected", "current", "visible",
          "invisible", "fade", "in", "out", "collapse", "collapsed", "collapsing", "expanded", "loading",
          "loaded", "error", "success", "focus", "hover", "dark", "light", "sticky", "fixed", "no-js",
-         "closed", "checked", "valid", "invalid", "scrolled", "dragging", "animating", "ready"}
+         "closed", "checked", "valid", "invalid", "scrolled", "dragging", "animating", "ready",
+         "showing", "hiding", "focus-visible", "js", "touch", "no-touch", "pending", "transitioning", "rtl", "ltr"}
 STATE_PREFIX = ("is-", "has-", "js-", "ng-", "v-", "router-link-", "swiper-", "slick-")
-TRANSITION = re.compile(r".-(enter|leave|exit|appear)(-(active|from|to|done))?$")
+TRANSITION = re.compile(r".-(enter|leave|exit|appear|move)(-(active|from|to|done))?$")
 # classes and ids that libraries and platforms add from their own code, rarely in the repository
 LIBRARY = re.compile(
     r"(hljs|token$|language-|lang-|line-numbers|highlight|chroma|codehilite|linenos|shiki|footnote|"
@@ -64,14 +77,20 @@ LIBRARY = re.compile(
     r"paypal|rc-|react-|Mui|ant-|el-|mat-|mdc-|cdk-|ion-|chakra-|mantine-|radix|headlessui|wp-|wp_|"
     r"align(left|right|center|none|wide|full)$|screen-reader-text|bypostauthor|gallery-|menu-item|"
     r"current-menu-|current_page_|page_item|sub-menu|kg-|shopify|gatsby-|__next|__nuxt|nuxt-|astro-|"
-    r"svelte-|turbo-|turbolinks|livewire|animate__|animated$|wow$)")
+    r"svelte-|turbo-|turbolinks|livewire|animate__|animated$|wow$|d?mermaid|anchor$|hash-link|heading-anchor|"
+    r"table-of-contents|markdown-body|theme-|navbar__|menu__|__docusaurus|wpadminbar|hubspot|crisp-|tidio|"
+    r"beacon-|credential_picker|google_translate|cbox|colorbox|drift-|webWidget|tawk|olark|_hj|hotjar|"
+    r"field_with_errors|errorlist|errornote|helptext|nonfield|asteriskField|ember-|tiptap|xterm|recharts-|"
+    r"apexcharts|highcharts-|chartjs-|rdp|sonner|Toastify|medium-zoom|lucide|feather|iconify|tabler-icon|"
+    r"phx-|htmx-|up-|sourceCode|docutils|toctree|pointer-event$|svg-inline)")
 # custom properties a framework, a theme or a widget reads from code that is rarely in the repository
 LIBRARY_VAR = re.compile(r"--(bs|tw|ifm|vp|vt|md|docsearch|swiper|plyr|toastify|rdp|mdc|mat|ion|chakra|"
                          r"mantine|sl|fa|pst|pico|bulma|nc|wp|radix|shiki|astro|mui|joy|ant|el|van|"
                          r"sd|rsbs|rt|toastify|reach|aa|ck|tox|fc|leaflet|maplibre|mapbox)-")
 PLATFORM = {"wp_head": "WordPress", "wp_footer": "WordPress", "wp_enqueue_style": "WordPress",
             "get_template_part": "WordPress", "Drupal": "Drupal", "core_version_requirement": "Drupal",
-            "ghost_head": "Ghost", "content_for_header": "Shopify", "content_for_layout": "Shopify"}
+            "ghost_head": "Ghost", "content_for_header": "Shopify", "content_for_layout": "Shopify",
+            "html_static_path": "Sphinx", "html_css_files": "Sphinx", "extra_css": "MkDocs"}
 BANNER = re.compile(rb"\A(?:\s*@charset[^;]*;)?\s*/\*.{0,800}?\*/", re.S)
 RELEASED = re.compile(rb"\bv?\d+\.\d+(?:\.\d+)?\b")
 LICENSE = re.compile(rb"licen[cs]e|copyright|\(c\)|\xc2\xa9", re.I)
@@ -81,6 +100,14 @@ LINK = re.compile(r"<link\b[^>]*>", re.I)
 HREF = re.compile(r"""\bhref\s*=\s*["']?([^"'\s>]+)""", re.I)
 SHEET_IMPORT = re.compile(r"""@(?:import|use|forward)\s+(?:url\(\s*)?["']([^"']+)["']""")
 SCRIPT_CSS = re.compile(r"""(?:\bimport\s+|\brequire\s*\(\s*)["']([^"'./][^"']*\.(?:css|scss))["']""")
+# a script that glues class names together from parts: ['icon', name].join('-'), a + '__' + b,
+# `${block}--${mod}`, '%s-%s' % (a, b) — or hands that job to a BEM helper library
+JOINER = re.compile(r"""\.join\(\s*(['"`])(?:-|_|__|--)\1\s*\)|\+\s*(['"`])(?:-|_|__|--)\2\s*\+|"""
+                    r"""\}(?:-|_|__|--)\$\{|%s(?:-|_|__|--)%s|\{\}(?:-|_|__|--)\{\}""")
+BEM_HELPER = re.compile(r"""['"](?:bem-cn(?:-lite)?|@bem-react/classname|react-bem-helper|bem-classname|easy-bem|"""
+                        r"""bem-css-modules|classnames-bem|bem-names|b_|bemit|@?[\w./-]*/bem)['"]|\bwithNaming\s*\(""")
+NEAR = 300                    # characters around the glue a part's string may sit
+QUOTED = re.compile(r"""(['"`])([A-Za-z_][A-Za-z0-9_-]*)\1""")
 FONT_HOSTS = ("fonts.googleapis.com", "fonts.bunny.net", "use.typekit.net", "fonts.cdnfonts.com",
               "api.fontshare.com")
 
@@ -145,8 +172,13 @@ def _rule(data: bytes, node, span: tuple[int, int]) -> Unit | None:
     block = next((c for c in node.named_children if c.type == "block"), None)
     if sel is None or sel.type != "selectors" or len(sel.children) != 1 or block is None:
         return None
-    if any(n.type in ("rule_set", "nesting_selector", "ERROR") for n in walk(block)):
-        return None                                      # nested rules style other elements too
+    keep = ""
+    for n in walk(block):
+        if n.type in ("rule_set", "nesting_selector", "ERROR", "keyframes_statement", "at_root_statement"):
+            return None                                  # nested rules style other elements; keyframes are global
+        if n.type == "include_statement" or (n.type == "at_rule" and n.named_children
+                                             and n.named_children[0].text not in INNER_AT):
+            keep = "a mixin or at-rule inside it may emit rules beyond it (@at-root, @font-face, @keyframes)"
     parts = _compound(data, sel.children[0]) or []
     classes = [w for k, w in parts if k == "class"]
     ids = [w for k, w in parts if k == "id"]
@@ -154,7 +186,7 @@ def _rule(data: bytes, node, span: tuple[int, int]) -> Unit | None:
     if not NAME.fullmatch(word):
         return None
     return Unit(kind="style", name=word, start=span[0], end=span[1], scope="repo", tokens="css", show=show,
-                cut=span)
+                cut=span, keep=keep)
 
 
 def _compound(data: bytes, node) -> list[tuple[str, str]] | None:
@@ -208,9 +240,12 @@ def judge(src: Source, units: list[Unit], sheets: list[tuple[int, int]]) -> list
         elif u.kind == "variable":
             u.keep = _keep_var(src, u.name, repo, unread)
         elif u.show.startswith("@"):
-            u.keep = _keep_built(src, u.name)
+            u.keep = (_keep_built(src, u.name)
+                      or (repo["external"] and f"this project loads a stylesheet from elsewhere ({repo['external']}), "
+                                               "which may name these keyframes or have them overridden here"))
         else:
-            u.keep = (_keep_name(u.name) or _keep_built(src, u.name) or _keep_module(src, u.name)
+            u.keep = (u.keep or _keep_name(u.name) or _keep_built(src, u.name) or _keep_joined(src, u.name, repo)
+                      or _keep_module(src, u.name)
                       or (repo["platform"] and f"{repo['platform']} renders markup from code that is not here")
                       or (unnamed and "no file here names this stylesheet; what loads it, and the markup "
                                       "it styles, is elsewhere")
@@ -232,6 +267,20 @@ def _keep_name(name: str) -> str:
 def _keep_built(src: Source, name: str) -> str:
     piece, where = _built(src, name)
     return f"a script may build it: '{piece}' stands alone in {where}" if piece else ""
+
+
+def _keep_joined(src: Source, name: str, repo: dict) -> str:
+    """A script that glues names from parts (.join('-'), a + '__' + b, `${a}-${b}`) and holds this
+    name's block as a string a few lines from the glue — 'icon' for icon-home — may build it; with a
+    BEM helper (block('button')('icon') → button__icon) the string can be anywhere in the file."""
+    for i in range(1, len(name)):
+        if name[i] not in "-_" or name[i - 1] in "-_":
+            continue
+        sep = name[i:i + 2] if name[i:i + 2] in ("__", "--") else name[i]
+        rel = repo["glued"].get(sep, {}).get(name[:i]) or repo["bem"].get(name[:i])
+        if rel:
+            return f"{rel} builds class names from parts, and '{name[:i]}' is a string beside the glue"
+    return ""
 
 
 def _keep_var(src: Source, name: str, repo: dict, unread: bool) -> str:
@@ -262,14 +311,28 @@ def _keep_module(src: Source, name: str) -> str:
         return f"a CSS module exposes it to scripts as '{camel}'"
     if not MODULE.search(src.rel):
         return ""
+    seen = _facts(src).setdefault("modules", {})
+    if src.rel not in seen:
+        seen[src.rel] = _module_read_whole(src)
+    return seen[src.rel]
+
+
+def _module_read_whole(src: Source) -> str:
+    """A script that reads a CSS module by a computed key or hands the whole object on."""
     base = re.escape(posixpath.basename(src.rel))
     binding = re.compile(r"import\s+(?:\*\s+as\s+)?(\w+)\s+from\s+['\"][^'\"]*" + base
                          + r"|(\w+)\s*=\s*require\(\s*['\"][^'\"]*" + base)
     for s in src.sources:
         for m in binding.finditer(s.text):
             b = m.group(1) or m.group(2)
-            if re.search(rf"\b{re.escape(b)}\s*\[", s.text):
-                return f"{s.rel} reads this CSS module with a computed key ({b}[…])"
+            rest = s.text[:m.start()] + s.text[m.end():]                # the import itself aside
+            for use in re.finditer(rf"(?<![\w$.]){re.escape(b)}(?![\w$])", rest):
+                after = rest[use.end():use.end() + 80]
+                if re.match(r"\s*(?:\?\.)?\s*\[", after):
+                    return f"{s.rel} reads this CSS module with a computed key ({b}[…])"
+                if re.match(r"\s*\??\.\s*[A-Za-z_$]", after) or re.match(r"\s*=[^=>]", after):
+                    continue                                            # styles.foo, or a name being set
+                return f"{s.rel} hands the whole CSS module on ({b}), where any of its classes may be read"
     return ""
 
 
@@ -287,6 +350,9 @@ def _built(src: Source, name: str) -> tuple[str, str]:
             files = src.index.files_with(piece, "css")
         else:
             files = src.index.files_with(piece) | src.index.files_with(piece + "$")   # `card__${elem}`
+        if piece[0] in "-_":
+            files = files | src.index.files_with("s" + piece, "css") | src.index.files_with("d" + piece, "css")
+            # '%s-lg' % size, printf("%d-col")
         where = next((f for f in sorted(files) if not f.endswith(SHEETS)), "")
         if where:
             return piece, where
@@ -361,10 +427,13 @@ def _facts(src: Source) -> dict:
     platform = next((p for w, p in PLATFORM.items() if src.index.files_with(w)), "")
     stems = {_stem(rel) for rel in src.index.ident if rel.endswith(SHEETS)}
     builds = external = ""
+    glued: dict[str, dict[str, str]] = {}               # separator → string beside it → file
+    bem: dict[str, str] = {}                            # any string in a file using a BEM helper → file
     for s in src.sources:
         if not s.rel.endswith(SHEETS):
             m = BUILDS_VARS.search(s.text)
             builds = builds or (s.rel if m else "")
+            _glue(s, glued, bem)
         found = [h.group(1) for tag in LINK.findall(s.text) if "stylesheet" in tag.lower()
                  for h in HREF.finditer(tag)]
         found = [u for u in found if u.startswith(("http:", "https:", "//"))]
@@ -374,9 +443,27 @@ def _facts(src: Source) -> dict:
                 found.append(u)                                          # not a stylesheet of this repo
         found = [u for u in found if not any(h in u for h in FONT_HOSTS)]
         external = external or (found[0] if found else "")
-    facts = {"platform": platform, "builds_vars": builds, "external": external}
+    facts = {"platform": platform, "builds_vars": builds, "external": external, "glued": glued, "bem": bem}
     _FACTS.update(index=src.index, facts=facts)
     return facts
+
+
+def _glue(s: Source, glued: dict, bem: dict) -> None:
+    """The strings a script holds a few lines from where it glues parts with a separator."""
+    if BEM_HELPER.search(s.text):
+        for m in QUOTED.finditer(s.text):
+            bem.setdefault(m.group(2), s.rel)
+        return
+    starts: dict[str, list[int]] = {}
+    for m in JOINER.finditer(s.text):
+        starts.setdefault(re.search(r"[-_]+", m.group()).group(), []).append(m.start())
+    if not starts:
+        return
+    for m in QUOTED.finditer(s.text):
+        for sep, at in starts.items():
+            k = bisect.bisect_right(at, m.start() + NEAR)
+            if k and at[k - 1] >= m.start() - NEAR - 20:
+                glued.setdefault(sep, {}).setdefault(m.group(2), s.rel)
 
 
 PACK = CssPack()
