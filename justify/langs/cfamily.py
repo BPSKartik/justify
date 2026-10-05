@@ -50,6 +50,7 @@ DECLARATORS = {"pointer_declarator", "reference_declarator", "array_declarator",
 TYPE_BODIES = {"struct_specifier", "union_specifier", "enum_specifier", "class_specifier"}
 
 INCLUDE = re.compile(r'^[ \t]*#[ \t]*include(?:_next)?[ \t]*[<"]([^>"\n]+)[>"]', re.M)
+QUOTED_INCLUDE = re.compile(r'^[ \t]*#[ \t]*include(?:_next)?[ \t]*"([^"\n]+)"', re.M)
 COMPUTED_INCLUDE = re.compile(r"^[ \t]*#[ \t]*include[ \t]+[A-Za-z_]", re.M)
 DEFINE = re.compile(r"^[ \t]*#[ \t]*define[ \t]+([A-Za-z_]\w*)(\()?((?:[^\n]*\\\r?\n)*[^\n]*)", re.M)
 FILE_SCOPE_MACRO = re.compile(r"^([A-Z][A-Z0-9_]*)[ \t]*\(", re.M)
@@ -58,10 +59,16 @@ PREPROCESSED = {".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".hh", ".hxx", ".c++"
                 ".tpp", ".tcc", ".def", ".x", ".tbl", ".y", ".yy", ".ypp", ".l", ".ll", ".lex", ".cu", ".cuh",
                 ".m", ".mm", ".ino", ".pde", ".s", ".sx", ".rc", ".pc", ".ec", ".cl", ".metal"}
 
-ATTRIBUTE = re.compile(r"__attribute__\s*\(\((.*?)\)\)|\[\[(.*?)\]\]|__declspec\s*\(\s*(dllexport)", re.S)
+# scripts that may read a source file as text, or build it alone
+SCRIPTS = {".sh", ".bash", ".zsh", ".py", ".pl", ".pm", ".t", ".rb", ".tcl", ".exp", ".js", ".mjs", ".ts", ".lua",
+           ".ps1", ".bat", ".cmd"}
+ATTRIBUTE = re.compile(r"__attribute__\s*\(\((.*?)\)\)|\[\[(.*?)\]\]|__declspec\s*\(\s*(dllexport|allocate)", re.S)
 KEEP_ATTRIBUTES = {"used", "unused", "maybe_unused", "constructor", "destructor", "section", "alias", "ifunc",
-                   "weak", "weakref", "externally_visible", "visibility", "retain", "dllexport"}
+                   "weak", "weakref", "externally_visible", "visibility", "retain", "dllexport", "allocate"}
 KEEP_MACRO_LOWER = {"__unused", "_unused", "__maybe_unused", "__used", "__visible", "asmlinkage"}
+SECTION_PRAGMA = re.compile(r"^[ \t]*#[ \t]*pragma[ \t]+(data_seg|const_seg|bss_seg|section|init_seg|"
+                            r"clang[ \t]+section)\b", re.M)
+COMMENT = re.compile(r"/\*.*?\*/|//[^\n]*", re.S)
 VERSION_STRING = re.compile(r'"\s*(@\(#\)|\$(Id|Header|Revision)\b)')
 LICENCE = re.compile(r"(?i)copyright|licen[sc]e|SPDX")
 PLAIN_VALUES = {"lambda_expression", "number_literal", "string_literal", "char_literal", "raw_string_literal",
@@ -78,7 +85,7 @@ class CFamilyPack(Pack):
     def units(self, src: Source) -> list[Unit]:
         if not src.rel.lower().endswith(SOURCE):
             return []                                    # a header belongs to whoever includes it
-        cpp = not src.rel.lower().endswith(".c")
+        cpp = not src.rel.endswith(".c")                  # foo.C is C++
         found = []
         for node, internal in _file_scope(src.tree.root_node, False):
             if node.type in ("function_definition", "template_declaration"):
@@ -97,9 +104,14 @@ class CFamilyPack(Pack):
         """What the preprocessor adds to a file: its includes, its includers, and pasted names."""
         repo = self._repo(src)
         tu = [r for r in repo.closure(src.rel) if r != src.rel]
-        shared = repo.is_included(src.rel)
-        words = repo.pasted_words([src.rel, *tu])
+        includers = repo.includers(src.rel)
+        # its statics reach past its file when another file includes it, when a script reads it as
+        # text (a test fixture), or when it includes a header that is not here (a generated table)
+        shared = bool(includers) or repo.read_by_script(src.rel) or repo.generated(src.rel)
+        # an included file is compiled as part of its includer: a pasting macro called there builds names here
+        words = repo.pasted_words(sorted({src.rel, *tu, *(r for i in includers for r in repo.closure(i))}))
         computed = bool(COMPUTED_INCLUDE.search(src.text))
+        sections = bool(SECTION_PRAGMA.search(src.text))
         out = []
         for u in found:
             if u.scope == "file":
@@ -107,6 +119,13 @@ class CFamilyPack(Pack):
                     continue                             # a header's macro or an included list names it
                 if shared:
                     u.scope = "repo"
+                if not u.keep:
+                    head = re.split(r"[{=;]", COMMENT.sub(" ", _between(src, u.start, u.end)), maxsplit=1)[0]
+                    hit = sorted(set(IDENT.findall(head)) & repo.keeping)
+                    if hit:
+                        u.keep = f"marked {hit[0]}, a macro that keeps it though nothing names it"
+                if not u.keep and sections and u.kind == "variable":
+                    u.keep = "the file places variables in named sections by #pragma (a CRT initialiser table, say)"
                 if not u.keep and computed:
                     u.keep = "the file #includes a file named by a macro, which may use it"
                 if not u.keep:
@@ -187,6 +206,9 @@ def _variable(src: Source, node, internal: bool, cpp: bool) -> Unit | None:
                    _between(src, ident.end_byte, value.start_byte if value is not None else node.end_byte))
     if not u.keep and value is not None and VERSION_STRING.match(_txt(src, value)):
         u.keep = "an @(#) or $Id$ string is kept in the binary for `what` and `ident` to find"
+    if not u.keep and value is not None and value.type in ("string_literal", "concatenated_string") \
+            and LICENCE.search(_txt(src, value)):
+        u.keep = "a copyright string is there to be found in the binary"
     if not u.keep and cpp and _runs_code(node, d, value):
         u.keep = "constructing it may run code (a constructor or a call) that nothing needs to name"
     return u
@@ -316,6 +338,12 @@ class _Repo:
         self.includes = {rel: [t for inc in INCLUDE.findall(text) for t in self._resolve(inc)]
                          for rel, text in self.texts.items()}
         self.included = {t for rel, ts in self.includes.items() for t in ts if t != rel}
+        self.included_by: dict[str, set[str]] = defaultdict(set)
+        for rel, ts in self.includes.items():
+            for t in ts:
+                if t != rel:
+                    self.included_by[t].add(rel)
+        self.computed = {rel for rel, text in self.texts.items() if COMPUTED_INCLUDE.search(text)}
         defines = [(m.group(1), m.group(2) is not None, m.group(3), m.span())
                    for text in self.texts.values() for m in DEFINE.finditer(text)]
         self.macros = {name for name, *_ in defines}
@@ -325,6 +353,14 @@ class _Repo:
             more = {name for name, fn, body, _ in defines
                     if fn and name not in self.pasting and set(IDENT.findall(body)) & self.pasting}
             self.pasting |= more
+            grew = bool(more)
+        # macros that stand for a keeping attribute (`#define CTOR __attribute__((constructor)) void`)
+        self.keeping = {name for name, _, body, _ in defines if _kept(body, body)}
+        grew = True
+        while grew:
+            more = {name for name, _, body, _ in defines
+                    if name not in self.keeping and set(IDENT.findall(body)) & self.keeping}
+            self.keeping |= more
             grew = bool(more)
         self._words: dict[str, set[str]] = {}
 
@@ -345,16 +381,49 @@ class _Repo:
                     todo.append(t)
         return sorted(seen)
 
-    def is_included(self, rel: str) -> bool:
-        """Another file #includes this one. Files Justify does not parse (.inc, .y, .cu …) can
-        too: only their words are known, so one holding `include` and the file's name counts."""
-        if rel in self.included:
-            return True
-        maybe = set(self.index.files_with("include"))
+    def includers(self, rel: str) -> set[str]:
+        """The files that #include this one, directly or not. Files Justify does not parse (.inc,
+        .y, .cu …) can too: only their words are known, so one holding `include` and the file's
+        name counts. So can `#include IMPL` with IMPL a macro: any file that spells the file's
+        name, in a repository where some file includes by macro, counts."""
+        seen, todo = set(), deque([rel])
+        while todo:
+            for i in self.included_by.get(todo.popleft(), ()):
+                if i not in seen and i != rel:
+                    seen.add(i)
+                    todo.append(i)
+        base = posixpath.basename(rel)
+        maybe = None
+        for w in IDENT.findall(base):
+            maybe = set(self.index.files_with(w)) if maybe is None else maybe & self.index.files_with(w)
+        maybe = (maybe or set()) - {rel}
+        has_include = self.index.files_with("include")
+        spelled = re.compile(rf"(?<![\w.-]){re.escape(base)}(?![\w-])")
+        for r in maybe:
+            if r in self.texts:
+                if self.computed and spelled.search(self.texts[r]):
+                    seen.add(r)
+                    seen |= self.computed - {rel}        # which file includes it is the macro's to say
+            elif self.computed:                          # `-DIMPL=\"x.c\"` in a build file, say
+                seen.add(r)
+                seen |= self.computed - {rel}
+            elif r in has_include and posixpath.splitext(r)[1].lower() in PREPROCESSED:
+                seen.add(r)
+        return seen
+
+    def read_by_script(self, rel: str) -> bool:
+        """A script names the file — a test that reads it as text (a fixture for a diff) or
+        compiles it on its own."""
+        maybe = None
         for w in IDENT.findall(posixpath.basename(rel)):
-            maybe &= self.index.files_with(w)
-        return any(r not in self.texts and r != rel and posixpath.splitext(r)[1].lower() in PREPROCESSED
-                   for r in maybe)
+            maybe = set(self.index.files_with(w)) if maybe is None else maybe & self.index.files_with(w)
+        return any(posixpath.splitext(r)[1].lower() in SCRIPTS for r in (maybe or ()) if r != rel)
+
+    def generated(self, rel: str) -> bool:
+        """It #includes "x.h" and no x.h is in the repository: a header made at build time, which
+        may hold a table naming this file's statics (configuration headers aside)."""
+        return any(not self._resolve(inc) and "conf" not in posixpath.basename(inc).lower()
+                   for inc in QUOTED_INCLUDE.findall(self.texts.get(rel, "")))
 
     def pasted_words(self, rels: list[str]) -> list[str]:
         """Words handed to a pasting macro anywhere in these files, longest first: the repository's

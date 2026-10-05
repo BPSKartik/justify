@@ -36,8 +36,9 @@ PURE_CALLS = {"errors.New", "fmt.Errorf", "fmt.Sprintf", "fmt.Sprint", "regexp.M
 BUILTINS = {"make", "new", "len", "cap", "append", "complex", "real", "imag", "min", "max", "string", "byte", "rune",
             "bool", "int", "int8", "int16", "int32", "int64", "uint", "uint8", "uint16", "uint32", "uint64",
             "uintptr", "float32", "float64", "complex64", "complex128", "any", "error"}
-DIRECTIVE = re.compile(r"^//(export\s+\w+|go:linkname\b|go:generate\b)")
+DIRECTIVE = re.compile(r"^//(export\s+\w+|go:linkname\b|go:wasmexport\b|go:generate\b)")
 DIRECTIVE_REASON = {"//export": "a cgo `//export` above it: C code calls it by name",
+                    "//go:wasmexport": "a `//go:wasmexport` above it: the WebAssembly host calls it by name",
                     "//go:linkname": "a `//go:linkname` above it: linked by name, not called",
                     "//go:generate": "a `//go:generate` directive sits on it"}
 
