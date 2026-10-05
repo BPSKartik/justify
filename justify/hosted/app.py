@@ -46,7 +46,7 @@ from .ghapp import AppError, app_from_env
 from .jobs import Jobs
 from .login import LoginError, LoginFlow, providers_from_env, safe_next
 from .mcp_hosted import build
-from .ratelimit import RateLimiter, client_ip
+from .ratelimit import RateLimiter, TooMany, client_ip
 from .seal import parse_key
 from .storage import Results, Snapshots, blob_from_env
 from .uploads import clean_name, unpack_files, unpack_zip
@@ -147,7 +147,10 @@ def create_app(jobs: Jobs | None = None, ghapp=None) -> Starlette:
                     db=database, results=Results(os.path.join(data_dir, "results"), blob))
     database = jobs.database
     accounts = Accounts(database)
-    burst = RateLimiter(_env_int("JUSTIFY_RATE_PER_HOUR", 60))     # any address, signed in or not
+    burst = RateLimiter(_env_int("JUSTIFY_RATE_PER_HOUR", 600))    # any start request, per address
+    # new audits only — a cached result costs nothing — per person when signed in, so a room full of
+    # people behind one address does not share one bucket
+    fresh = RateLimiter(_env_int("JUSTIFY_NEW_PER_HOUR", 60))
     providers = providers_from_env()
     ghapp = ghapp or app_from_env()               # private repositories, when the GitHub App is set up
     if ghapp:
@@ -272,9 +275,20 @@ def create_app(jobs: Jobs | None = None, ghapp=None) -> Starlette:
                        429, "rate_limited", retry_after=wait)
         if body.get("private"):
             return await private_scan(request, user, rr, ip)
+        mine = f"user:{user['id']}" if user else f"web:{ip}"
+
+        def charge(tx) -> None:                     # called only when a new audit is about to be queued
+            ok, wait = fresh.take(mine)
+            if not ok:
+                raise TooMany(wait)
+            accounts.charge(user, ip, tx)
         try:
             scan, _ = await run_in_threadpool(jobs.submit, rr, "web" if how == "session" else "api",
-                                              user["id"] if user else None, lambda tx: accounts.charge(user, ip, tx))
+                                              user["id"] if user else None, charge)
+        except TooMany as exc:
+            return err(f"That is a lot of new audits from {'your account' if user else 'one address'}. Try again in "
+                       f"about {exc.wait // 60 + 1} minutes — results already audited still open.", 429,
+                       "rate_limited", retry_after=exc.wait)
         except QuotaExceeded as exc:
             return quota_error(exc, user)
         except FetchError as exc:
@@ -386,9 +400,10 @@ def create_app(jobs: Jobs | None = None, ghapp=None) -> Starlette:
                        "and try again.", 400, "no_key")
         ip = ip_of(request)
         ok, wait = burst.take(f"web:{ip}")
+        if ok:
+            ok, wait = fresh.take(f"user:{user['id']}")    # an upload is always a new audit
         if not ok:
-            return err("That is a lot of requests from one address. Try again shortly.", 429, "rate_limited",
-                       retry_after=wait)
+            return err("That is a lot of requests. Try again shortly.", 429, "rate_limited", retry_after=wait)
         ctype = request.headers.get("content-type", "").split(";")[0].strip().lower()
         limit = 26 * 1024 * 1024 if ctype != "application/json" else 9 * 1024 * 1024
         if int(request.headers.get("content-length") or 0) > limit:

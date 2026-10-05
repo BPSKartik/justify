@@ -341,7 +341,9 @@ class Jobs:
         os.makedirs(home, exist_ok=True)
         env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": home, "LANG": "C.UTF-8",
                "JUSTIFY_HOME": os.path.join(home, ".justify"), "PYTHONDONTWRITEBYTECODE": "1",
-               "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull, "GIT_TERMINAL_PROMPT": "0"}
+               "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull, "GIT_TERMINAL_PROMPT": "0",
+               # syntax trees for other languages stay in memory: two of the largest audits at once must fit
+               "JUSTIFY_LANG_MAX_LINES": os.environ.get("JUSTIFY_LANG_MAX_LINES", "1500000")}
         out_path = os.path.join(work, "result.json")
         limit = self.scan_mem_mb * 1_048_576
 

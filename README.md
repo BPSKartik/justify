@@ -11,21 +11,26 @@ Real output, on the Bennett face-attendance system:
 ```
 $ justify scan ./face-attendance --prove "<run the tests>"
 
-Justify  ·  /Users/kartik/face-attendance
+Justify  ·  ~/face-attendance
+  Made of   Python 4,829, HTML 2,156, CSS 500, Shell 403, Markdown 303, YAML 59 lines
   Stage 1  24 Python files, 4,829 lines, each hashed
-  Stage 3  1 AMBIGUOUS, 12 REMOVE, 6 SIMPLIFY
-  Stage 6  11 of 12 removals proved by the tests · 1 not provable (the tests never load this file)
+  Also     CSS 500, HTML 2,156 lines audited for dead code
+  Stage 3  1 AMBIGUOUS, 14 REMOVE, 6 SIMPLIFY
+  Stage 6  11 of 14 removals proved by the tests · 3 not provable (the tests never load this file)
 
   KEEP     import     app.py:21          date          proof: not provable (the tests never load this file)
   REMOVE   import     core/teams.py:40   io            no use anywhere in the file, not re-exported
   REMOVE   function   core/clock.py:51   clock_time    no reference to 'clock_time' anywhere in the repository
   SIMPLIFY duplicate  serve.py:62        main          same body as main() in serve.py:32 — merge into one
+  KEEP     variable   static/style.css:31  --danger    proof: not provable (the tests never load this file)
   ...
-  Justified Line Ratio  99.09%   ·   dead weight 44 lines (9.11 per 1,000)   ·   duplicate lines 58
+  Justified Line Ratio  99.41%   ·   dead weight 44 lines (5.88 per 1,000)   ·   duplicate lines 58
+  Python alone          99.09%
 ```
 
 `app.py:21` really is unused — but the tests never import `app.py`, so a passing run would prove
-nothing. Justify says so instead of calling it proved.
+nothing. Justify says so instead of calling it proved. The same goes for the two CSS variables
+nothing uses: no test loads the stylesheet, so they stay.
 
 ## What it found on public AI-assisted repositories
 
@@ -63,17 +68,17 @@ from the first AI-assisted commit, and newer code has had less time to be rewrit
 audited. Every result is drawn as a 3D city of the repository — one tower per file, coral floors for
 dead weight, gold for copies, violet for AI-signed lines — next to the line items.
 
-- **Any language gets an audit.** Python gets the full dead-code audit; JavaScript, TypeScript, Go,
-  Java, C, C++, C#, Rust and 20 more are checked for copied blocks; every repository gets a census of
-  what it is made of and who wrote it.
+- **15 languages audited for dead code:** Python, JavaScript, TypeScript (React too), Java, Kotlin,
+  C#, C, C++, Go, Rust, PHP, Swift, CSS, SCSS and HTML. More than 25 are checked for copied blocks,
+  and every repository gets a census of what it is made of and who wrote it.
 - **Who wrote it** comes from the signatures assistants leave in commits — `Co-Authored-By` trailers,
   "Generated with" lines, and the accounts agents commit as (Copilot coding agent, Devin, Jules,
   Cursor Agent, Aider). Code pasted from a chat window has no signature; it is reported as *no AI
   trace*, never as human, and a history too thin to tell is said to be.
 - **Accounts** (GitHub or Microsoft sign-in, public profile only): a history of your audits with
-  trends and *what changed since the last audit*, a daily allowance, your GitHub repositories one
-  click from an audit, private uploads and private repositories (results sealed so only you can
-  read them), connected AI apps and personal tokens.
+  trends and *what changed since the last audit*, a daily allowance, your public GitHub repositories one
+  click from an audit, private uploads (results sealed so only you can read them; private
+  repositories too, where the GitHub App below is set up), connected AI apps and personal tokens.
 - **MCP with sign-in.** AI apps connect with standard OAuth (dynamic client registration, PKCE) or a
   personal token, and get a fix plan, file by file. Tools: `scan_github_repo`, `audit_code`,
   `get_scan_result`, `my_audits`.
@@ -111,15 +116,15 @@ the container needs no Node.
 ## Install
 
 ```bash
-pip install -e ".[mcp]"        # Python 3.10+; the core has no dependencies
+pip install -e ".[mcp,languages]"   # Python 3.10+; "languages" adds the 14 besides Python
 ```
 
 ## The seven stages
 
 | # | Stage | What it does | Uses a model |
 |---|---|---|---|
-| 1 | Ingest | Reads every Python file once and hashes it, so later runs skip what has not changed | no |
-| 2 | Static facts | Parses syntax trees; builds who-uses-what from names, attributes, imports, parameters, code-like strings and config files | no |
+| 1 | Ingest | Reads every file, counts its languages, and hashes each Python file, so later runs skip what has not changed | no |
+| 2 | Static facts | Parses syntax trees (Python's own parser; tree-sitter for the other 14 languages); builds who-uses-what from names, attributes, imports, parameters, code-like strings and config files | no |
 | 3 | Candidates | Unused imports, functions, classes, dependencies; duplicate helpers. Anything a static graph can misjudge goes to AMBIGUOUS | no |
 | 4 | Justify | One structured question per candidate; every reason must cite a file:line that is then checked | yes |
 | 5 | Challenge | A second, independent call tries to prove the code IS needed | yes |
@@ -271,8 +276,10 @@ Full file: `examples/justify-workflow.yml`.
 
 ## Limits
 
-- Dead code is found in Python only; other languages get copied blocks, a census and authorship.
-- Methods are not judged — they are called through objects in ways a static graph cannot see.
+- Dead code is found in 15 languages. The jury (stages 4-5) judges Python only: in the other 14,
+  a unit the rules cannot settle stays, and anything exported or public — code another project
+  could call — is only flagged, never removed. Other languages get copied blocks, a census and authorship.
+- In Python, methods are not judged — they are called through objects in ways a static graph cannot see.
 - Removing a dependency cannot be proved without a clean install, so dependencies are reported, not removed.
 - Passing tests prove behaviour is unchanged, not that the code is better; weak tests mean weak proof.
 - A program whose wrong output still exits 0 is only caught if its tests check that output.

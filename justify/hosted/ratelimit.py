@@ -6,6 +6,14 @@ import threading
 import time
 
 
+class TooMany(Exception):
+    """Raised from inside a job's charge: the limit for new audits is reached."""
+
+    def __init__(self, wait: int):
+        super().__init__(f"try again in {wait} s")
+        self.wait = wait
+
+
 class RateLimiter:
     def __init__(self, per_hour: int):
         self.capacity = max(1, per_hour)

@@ -189,6 +189,9 @@ def run(root: str | pathlib.Path, *, model: Model | None = None, prove_command: 
     if lang_note["files"]:
         stage("copies", f"{len(more)} findings in {lang_note['files']} files of "
               f"{', '.join(lang_note['languages'])}", findings=len(findings) + len(other) + len(more))
+    elif lang_note.get("skipped"):
+        stage("copies", f"{lang_note['skipped']:,} lines in other languages: more than this server audits for "
+              "dead code at once, so they were checked for copies only", findings=len(findings) + len(other))
     for f in findings:                    # a test's own helpers cannot be proved by running it
         ff = rf.files.get(f.file)
         if ff is not None and ff.is_test and f.kind != "import" and f.proof == "not run":
@@ -266,7 +269,8 @@ def run(root: str | pathlib.Path, *, model: Model | None = None, prove_command: 
     res = Result(root=str(root), started=started, files=len(sources), lines=rf.total_lines,
                  unparsed=[s.rel for s in sources if s.error], findings=findings, metrics=metrics,
                  judging=judging if model else None, proof=proof, hashes={s.rel: s.sha for s in sources},
-                 languages=polyglot.summary(files_all), files_detail=_files_detail(files_all, findings, att))
+                 languages=polyglot.summary(files_all, set() if lang_note.get("skipped") else None),
+                 files_detail=_files_detail(files_all, findings, att))
     if record:                                                # stage 7: the ledger
         from .ledger import Ledger
         res.run_id = Ledger().record(res)
