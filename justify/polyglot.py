@@ -122,15 +122,17 @@ def census(root: pathlib.Path) -> list[CodeFile]:
     return out
 
 
-def summary(files: list[CodeFile]) -> list[dict]:
-    """Languages by size, each with how deeply Justify audits it."""
+def summary(files: list[CodeFile], full: set[str] | None = None) -> list[dict]:
+    """Languages by size, each with how deeply Justify audits it. `full` overrides which
+    languages besides Python were audited for dead code (none, when the audit was too large)."""
     by: dict[str, dict] = {}
     for f in files:
         row = by.setdefault(f.lang, {"name": f.lang, "files": 0, "lines": 0})
         row["files"] += 1
         row["lines"] += f.lines
-    from . import langs
-    full = langs.full_languages()
+    if full is None:
+        from . import langs
+        full = langs.full_languages()
     for row in by.values():
         row["audit"] = ("full" if row["name"] == "Python" or row["name"] in full else
                         "copies" if row["name"] in COPY_LANGS else

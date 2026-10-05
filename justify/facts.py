@@ -568,7 +568,9 @@ PROSE_SUFFIXES = (".md", ".rst", ".txt", ".adoc", ".markdown")
 # url_for('index') in a template); its own variables — {% for b in batches %} — cannot
 WEB_SUFFIXES = (".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".vue", ".svelte", ".html", ".htm",
                 ".jinja", ".jinja2", ".j2", ".css", ".scss", ".less")
-STRING_LIT = re.compile(r"""(["'`])((?:\\.|(?!\1).)*)\1""")
+# a backslash only ever starts an escape: with `.` it could also stand alone, and a line full of
+# backslashes (a regex in a grammar file) then took minutes to try every reading
+STRING_LIT = re.compile(r"""(["'`])((?:\\.|(?!\1)[^\\])*)\1""")
 
 
 # A YAML key whose list names Python files that a tool loads and calls by function name:

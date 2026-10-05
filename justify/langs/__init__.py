@@ -28,6 +28,7 @@ their census and copy check.
 
 from __future__ import annotations
 
+import os
 import pathlib
 import re
 from collections import Counter, defaultdict
@@ -201,6 +202,15 @@ def audit(root: pathlib.Path, census: list, texts: dict[str, str] | None = None)
     if not AVAILABLE:
         return [], note
     packs = _packs()
+    # every syntax tree stays in memory until the audit ends (about 0.5 KB a line), so a server
+    # sets a ceiling; past it the other languages are only checked for copies, and the audit says so
+    cap = int(os.environ.get("JUSTIFY_LANG_MAX_LINES") or 0)
+    if cap:
+        size = sum(c.lines for c in census
+                   if not c.generated and getattr(packs.get(c.lang), "implemented", False))
+        if size > cap:
+            note["skipped"] = size
+            return [], note
     index = Index()
     sources: list[Source] = []
     for c in census:

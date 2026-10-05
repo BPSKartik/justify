@@ -76,9 +76,9 @@
             </div>
             <p id="repo-error" class="field-error" role="alert" hidden></p>
             <p id="repo-hint" class="hint">Try
-              <button type="button" class="example" data-repo="PrefectHQ/fastmcp">PrefectHQ/fastmcp</button>
-              <button type="button" class="example" data-repo="judeper/FSI-CopilotGov">judeper/FSI-CopilotGov</button>
-              <button type="button" class="example" data-repo="Azure/azure-functions-agents-runtime">Azure/azure-functions-agents-runtime</button></p>
+              <button type="button" class="example" data-repo="PrefectHQ/fastmcp" data-scan="s_44a1c9385d">PrefectHQ/fastmcp</button>
+              <button type="button" class="example" data-repo="gabrielecirulli/2048" data-scan="s_5b8dc5f95a">gabrielecirulli/2048</button>
+              <button type="button" class="example" data-repo="Azure/azure-functions-agents-runtime" data-scan="s_287f8985c6">Azure/azure-functions-agents-runtime</button></p>
           </form>
 
           <form id="upload-form" class="scan-form upload-form" role="tabpanel" aria-labelledby="tab-upload" hidden novalidate>
@@ -180,7 +180,7 @@
           <li data-stage="ingest"><span class="dot"></span><span class="rail-name">Read</span><span class="rail-note">every file</span></li>
           <li data-stage="facts"><span class="dot"></span><span class="rail-name">Map</span><span class="rail-note">who uses what</span></li>
           <li data-stage="candidates"><span class="dot"></span><span class="rail-name">Question</span><span class="rail-note">what needs a reason</span></li>
-          <li data-stage="copies"><span class="dot"></span><span class="rail-name">Every language</span><span class="rail-note">dead code and copies</span></li>
+          <li data-stage="copies"><span class="dot"></span><span class="rail-name">14 more languages</span><span class="rail-note">dead code · copies in 25+</span></li>
           <li data-stage="attribution"><span class="dot"></span><span class="rail-name">Attribute</span><span class="rail-note">AI-signed or not</span></li>
           <li data-stage="metrics"><span class="dot"></span><span class="rail-name">Score</span><span class="rail-note">the payoff</span></li>
           <li data-stage="local" class="local"><span class="dot"></span><span class="rail-name">Judge &amp; prove</span><span class="rail-note">on your machine</span></li>
@@ -404,7 +404,7 @@
       <ol class="pipeline">
         <li><span class="pn">1</span><b>Ingest</b><span>Every file read once and fingerprinted; every language counted.</span></li>
         <li><span class="pn">2</span><b>Static facts</b><span>Syntax trees, not text search: who uses what, across the whole repository.</span></li>
-        <li><span class="pn">3</span><b>Candidates</b><span>Frameworks, dynamic lookups and re-exports held back. Copies found in every language.</span></li>
+        <li><span class="pn">3</span><b>Candidates</b><span>Frameworks, dynamic lookups and re-exports held back. Copies found in 25+ languages.</span></li>
         <li class="model"><span class="pn">4</span><b>Justify</b><span>A jury of models is asked why the unit exists, and must cite a file and line that is checked.</span></li>
         <li class="model"><span class="pn">5</span><b>Challenge</b><span>The strongest model tries to prove the code is needed. If it can, the code stays.</span></li>
         <li class="proof"><span class="pn">6</span><b>Proof</b><span>Removed in a temporary copy; your tests run. A file the tests never load is “not provable”.</span></li>

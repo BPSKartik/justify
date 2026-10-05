@@ -783,7 +783,11 @@
     $("scan-form").addEventListener("submit", (e) => { e.preventDefault(); startScan(normalise($("repo").value)); });
     $("repo").addEventListener("input", () => showFieldError(""));
     for (const b of document.querySelectorAll(".example")) {
-      b.addEventListener("click", () => { $("repo").value = b.dataset.repo; startScan(b.dataset.repo); });
+      // an example opens the audit we already ran (the one on our slides), not today's commit
+      b.addEventListener("click", () => {
+        $("repo").value = b.dataset.repo;
+        if (b.dataset.scan) openScan(b.dataset.scan, true); else startScan(b.dataset.repo);
+      });
     }
     $("tab-repo").addEventListener("click", () => selectSource("repo"));
     $("tab-upload").addEventListener("click", () => selectSource("upload"));
