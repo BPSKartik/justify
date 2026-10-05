@@ -41,7 +41,7 @@ from starlette.staticfiles import StaticFiles
 from .. import __version__
 from .accounts import Accounts, QuotaExceeded
 from .db import Database
-from .fetch import FetchError, parse
+from .fetch import FetchError, check_size, parse
 from .ghapp import AppError, app_from_env
 from .jobs import Jobs
 from .login import LoginError, LoginFlow, providers_from_env, safe_next
@@ -145,6 +145,8 @@ def create_app(jobs: Jobs | None = None, ghapp=None) -> Starlette:
                     clone_timeout=_env_int("JUSTIFY_CLONE_TIMEOUT_S", 180),
                     max_mb=_env_int("JUSTIFY_MAX_REPO_MB", 400), scan_mem_mb=_env_int("JUSTIFY_SCAN_MEM_MB", 3072),
                     db=database, results=Results(os.path.join(data_dir, "results"), blob))
+        max_mb = _env_int("JUSTIFY_MAX_REPO_MB", 400)
+        jobs.size_fn = lambda rr: check_size(rr, max_mb)
     database = jobs.database
     accounts = Accounts(database)
     burst = RateLimiter(_env_int("JUSTIFY_RATE_PER_HOUR", 600))    # any start request, per address

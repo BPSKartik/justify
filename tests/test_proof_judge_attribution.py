@@ -221,7 +221,7 @@ def test_cli_progress_version_and_friendly_errors(make_repo, capsys):
         main(["--version"])
     except SystemExit:
         pass
-    assert "justify 1.0.0" in capsys.readouterr().out
+    assert "justify 1.1.0" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------- the jury

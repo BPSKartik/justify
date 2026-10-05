@@ -10,4 +10,4 @@ The name lives here and only here, so renaming the product is one edit.
 
 NAME = "Justify"
 TAGLINE = "Every line earns its place."
-__version__ = "1.0.0"
+__version__ = "1.1.0"

@@ -22,8 +22,11 @@ from dataclasses import dataclass
 
 OWNER = r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})"
 NAME = r"[A-Za-z0-9._-]{1,100}"
-URL = re.compile(rf"^(?:https?://)?(?:www\.)?github\.com/({OWNER})/({NAME}?)(?:\.git)?"
-                 rf"(?:/(?:tree|blob)/([A-Za-z0-9._/-]{{1,200}}))?/?$", re.I)
+# anything after owner/name — a page inside the repository, a ?query, a #fragment — is what people
+# copy from the address bar; only /tree/<ref> and /blob/<ref>/... name something to audit
+URL = re.compile(rf"^(?:https?://)?(?:www\.)?github\.com/({OWNER})/({NAME}?)(?:\.git)?(/[^?#]*)?(?:[?#].*)?$", re.I)
+INSIDE = re.compile(r"^/(?:tree|blob)/(.+)$")
+SEGMENT = re.compile(r"^[A-Za-z0-9._-]+$")
 SHORT = re.compile(rf"^({OWNER})/({NAME}?)(?:\.git)?$")
 REF = re.compile(r"^[A-Za-z0-9._/-]{1,200}$")
 SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -70,7 +73,14 @@ def parse(repo: str, ref: str = "") -> RepoRef:
     owner, name = m.group(1), m.group(2)
     if name in (".", "..") or name.endswith(".") or owner.endswith("-"):
         raise FetchError("That is not a valid GitHub repository name.")
-    ref = (ref or (m.group(3) if m.re is URL else "") or "").strip().strip("/")
+    if not ref and m.re is URL and (inside := INSIDE.match(m.group(3) or "")):
+        parts = []
+        for seg in inside.group(1).split("/"):     # a branch, then perhaps a path: keep what can be a name
+            if not SEGMENT.match(seg) or seg == "..":
+                break
+            parts.append(seg)
+        ref = "/".join(parts)[:200]
+    ref = (ref or "").strip().strip("/")
     if ref:
         bad = (not REF.match(ref) or ref.startswith(("-", ".", "/")) or ".." in ref or "//" in ref
                or ref.endswith((".lock", "/", ".")) or "@{" in ref)
@@ -92,12 +102,28 @@ def _env(home: str, token: str | None = None) -> dict:
     return env
 
 
+def _prefixes(ref: str) -> list[str]:
+    """main/src/app.py from a /tree or /blob address: the branch is some leading part of it."""
+    parts = ref.split("/")
+    return ["/".join(parts[:n]) for n in range(len(parts), 0, -1)]
+
+
+def _pick(found: dict[str, str], ref: str) -> tuple[str, str] | None:
+    """The longest leading part of `ref` that is a branch or tag, and its commit."""
+    for cand in _prefixes(ref):
+        for name in (f"refs/heads/{cand}", f"refs/tags/{cand}^{{}}", f"refs/tags/{cand}"):
+            if SHA.match(found.get(name, "")):
+                return found[name], cand
+    return None
+
+
 def resolve(rr: RepoRef, timeout: int = 30, token: str | None = None) -> tuple[str, str]:
     """The commit to scan and the branch or tag it came from, without downloading anything."""
     with tempfile.TemporaryDirectory(prefix="justify-ls-") as home:
+        patterns = [p for cand in _prefixes(rr.ref) for p in
+                    (f"refs/heads/{cand}", f"refs/tags/{cand}", f"refs/tags/{cand}^{{}}")] if rr.ref else []
         args = GIT + ["ls-remote", "--symref", "--", rr.clone_url, "HEAD"] if not rr.ref else \
-            GIT + ["ls-remote", "--", rr.clone_url, f"refs/heads/{rr.ref}", f"refs/tags/{rr.ref}",
-                   f"refs/tags/{rr.ref}^{{}}"]
+            GIT + ["ls-remote", "--", rr.clone_url, *patterns]
         try:
             r = subprocess.run(args, capture_output=True, text=True, errors="replace", timeout=timeout, env=_env(home, token))
         except subprocess.TimeoutExpired:
@@ -117,11 +143,50 @@ def resolve(rr: RepoRef, timeout: int = 30, token: str | None = None) -> tuple[s
         if not SHA.match(sha):
             raise FetchError(f"{rr.slug} has no commits to scan.", 404, "empty")
         return sha, branch or "HEAD"
-    found = {name: sha for sha, name in lines}
-    for name in (f"refs/heads/{rr.ref}", f"refs/tags/{rr.ref}^{{}}", f"refs/tags/{rr.ref}"):
-        if SHA.match(found.get(name, "")):
-            return found[name], rr.ref
+    hit = _pick({name: sha for sha, name in lines}, rr.ref)
+    if hit:
+        return hit
     raise FetchError(f"{rr.slug} has no branch or tag named “{rr.ref}”.", 404, "ref_not_found")
+
+
+_SIZES: dict[str, tuple[float, int]] = {}
+
+
+def _github_kb(rr: RepoRef, timeout: float) -> int | None:
+    """GitHub's own figure for the repository's size, or None when it cannot say."""
+    import json
+    import urllib.request
+
+    from ..llm import _ssl_context
+    req = urllib.request.Request(f"https://api.github.com/repos/{rr.owner}/{rr.name}",
+                                 headers={"Accept": "application/vnd.github+json", "User-Agent": "justify"})
+    cid, secret = os.environ.get("JUSTIFY_GITHUB_CLIENT_ID"), os.environ.get("JUSTIFY_GITHUB_CLIENT_SECRET")
+    if cid and secret:                    # the sign-in app's own allowance: 5,000 an hour, not 60
+        req.add_header("Authorization", "Basic " + base64.b64encode(f"{cid}:{secret}".encode()).decode())
+    try:
+        with urllib.request.urlopen(req, timeout=timeout, context=_ssl_context()) as r:
+            size = json.load(r).get("size")
+    except (OSError, ValueError):
+        return None
+    return size if isinstance(size, int) else None
+
+
+def check_size(rr: RepoRef, max_mb: int, timeout: float = 5.0) -> None:
+    """Refuse a repository GitHub already says is far too large, before it is queued or charged.
+    GitHub counts every blob of every commit and the clone leaves those over 1 MB behind — React is
+    1,075 MB on GitHub and a 201 MB clone — so only one far past the limit is refused here; the
+    clone still watches its own size. No answer: no refusal."""
+    key, now = rr.slug.lower(), time.monotonic()
+    hit = _SIZES.get(key)
+    kb = hit[1] if hit and now - hit[0] < 3600 else _github_kb(rr, timeout)
+    if kb is None:
+        return
+    if len(_SIZES) > 5000:
+        _SIZES.clear()
+    _SIZES[key] = (hit[0] if hit and now - hit[0] < 3600 else now, kb)
+    if kb > max_mb * 1024 * 5:
+        raise FetchError(f"{rr.slug} is about {kb // 1024:,} MB on GitHub — too large for the hosted service. "
+                         "Install Justify on your own machine to audit it.", 413, "too_large")
 
 
 def _size_mb(path: str) -> float:

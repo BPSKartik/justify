@@ -105,3 +105,65 @@ def test_people_behind_one_address_each_get_their_own_new_audits_and_cached_ones
             r = c.post("/api/scans", json={"repo": repo}, headers=_sign_in(c, name))
             assert r.status_code == 202, r.json()
             _done(c, r.json()["id"])
+
+
+# ---------------------------------------------------------------- what people paste
+
+from justify.hosted import fetch  # noqa: E402
+from justify.hosted.fetch import FetchError, RepoRef, parse  # noqa: E402
+
+
+@pytest.mark.parametrize("pasted, ref", [
+    ("https://github.com/BPSKartik/dsa-python?tab=readme-ov-file", ""),
+    ("https://github.com/BPSKartik/dsa-python#readme", ""),
+    ("https://github.com/BPSKartik/dsa-python/pulls", ""),
+    ("https://github.com/BPSKartik/dsa-python/commit/abc123", ""),
+    ("https://github.com/BPSKartik/dsa-python/tree/main/src", "main/src"),
+    ("https://github.com/BPSKartik/dsa-python/blob/main/README.md?plain=1", "main/README.md"),
+    ("https://github.com/BPSKartik/dsa-python/tree/main/a%20b/c", "main"),
+])
+def test_what_people_copy_from_the_address_bar(pasted, ref):
+    assert parse(pasted) == RepoRef("BPSKartik", "dsa-python", ref)
+
+
+def test_a_branch_is_the_longest_leading_part_that_exists():
+    a, b = "a" * 40, "b" * 40
+    found = {"refs/heads/main": a, "refs/heads/release/1.2": b}
+    assert fetch._pick(found, "main/src/app.py") == (a, "main")
+    assert fetch._pick(found, "release/1.2/docs") == (b, "release/1.2")
+    assert fetch._pick(found, "nope/x") is None
+
+
+def test_a_repository_github_says_is_far_too_large_is_refused_before_it_is_queued(monkeypatch):
+    calls = []
+
+    def kb(rr, timeout):
+        calls.append(rr.slug)
+        return {"o/huge": 6_400_000, "o/small": 200}.get(rr.slug)
+    monkeypatch.setattr(fetch, "_github_kb", kb)
+    monkeypatch.setattr(fetch, "_SIZES", {})
+    with pytest.raises(FetchError) as e:
+        fetch.check_size(RepoRef("o", "huge"), 400)
+    assert e.value.status == 413 and "own machine" in str(e.value)
+    fetch.check_size(RepoRef("o", "small"), 400)
+    fetch.check_size(RepoRef("o", "small"), 400)                   # asked once an hour
+    fetch.check_size(RepoRef("o", "unknown"), 400)                 # GitHub did not say: no refusal
+    assert calls.count("o/small") == 1
+
+
+def test_a_refused_repository_costs_no_allowance(room):
+    with room() as c:
+        jobs = c.app.state.jobs
+
+        def size(rr):
+            if rr.slug == "owner/huge":
+                raise FetchError("owner/huge is too large", 413, "too_large")
+        jobs.size_fn = size
+        for _ in range(3):
+            r = c.post("/api/scans", json={"repo": "owner/huge"})
+            assert r.status_code == 413 and r.json()["code"] == "too_large"
+        assert not jobs.database.all("SELECT id FROM scans WHERE repo='owner/huge'")
+        for repo in ("owner/one", "owner/two"):                    # both new audits this hour are still there
+            r = c.post("/api/scans", json={"repo": repo})
+            assert r.status_code == 202, r.json()
+            _done(c, r.json()["id"])

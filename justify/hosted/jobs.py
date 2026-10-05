@@ -95,6 +95,7 @@ class Jobs:
         self.token_fn = None             # installation id -> GitHub App token, for private repositories
         self.clone_fn = clone            # tests replace these with local fixtures
         self.resolve_fn = resolve
+        self.size_fn = None              # the server refuses a far too large repository before queueing it
         self.scan_argv = lambda repo_dir: [sys.executable, "-m", "justify.cli", "scan", repo_dir, "--json",
                                            "--no-record", "--progress"]
         for i in range(max(1, workers)):
@@ -194,6 +195,8 @@ class Jobs:
         `charge(tx)` is called only when a new scan is about to be queued, inside the same
         transaction, and may refuse it by raising."""
         sha, branch = self.resolve_fn(rr)
+        if self.size_fn:
+            self.size_fn(rr)
         slug = rr.slug
         with self.database.transaction() as tx:
             done = tx.execute("SELECT * FROM scans WHERE lower(repo)=lower(?) AND sha=? AND version=? AND "
