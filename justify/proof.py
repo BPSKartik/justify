@@ -39,7 +39,7 @@ from collections import defaultdict
 
 from .model import Finding
 
-PROVABLE_KINDS = {"import", "function", "class"}
+PROVABLE_KINDS = {"import", "function", "class", "method", "field", "variable", "type", "style"}
 
 # names of environment variables that hold secrets; they never reach the tests
 SECRET_ENV = re.compile(r"TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|ACCESS_?KEY|PRIVATE|CREDENTIAL|^AZURE_|^AWS_|"
@@ -151,6 +151,14 @@ def edit_source(text: str, items: list[Finding]) -> str:
     return out
 
 
+def _edit(rel: str, text: str, items: list[Finding]) -> str:
+    """Python is edited on its syntax tree; every other language through its pack."""
+    if rel.endswith((".py", ".pyi")):
+        return edit_source(text, items)
+    from . import langs
+    return langs.edit_source(rel, text, items)
+
+
 def read_source(path: pathlib.Path) -> tuple[str, str]:
     """Text and encoding, honouring a BOM or a coding cookie the way Python does."""
     raw = path.read_bytes()
@@ -237,7 +245,7 @@ class _Runner:
         env["PYTHONPATH"] = os.pathsep.join(paths + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else []))
         env.setdefault("PYTHONDONTWRITEBYTECODE", "1")
         p = subprocess.Popen(self.command, shell=True, cwd=self.copy_root, stdout=subprocess.PIPE,
-                             stderr=subprocess.STDOUT, text=True, env=env, start_new_session=True)
+                             stderr=subprocess.STDOUT, text=True, errors="replace", env=env, start_new_session=True)
         try:
             out, _ = p.communicate(timeout=self.timeout)
         except subprocess.TimeoutExpired:
@@ -314,7 +322,7 @@ def prove(root: pathlib.Path, findings: list[Finding], command: str, timeout: in
             for f in items:
                 by_file[f.file].append(f)
             for rel, fs in by_file.items():
-                write(rel, edit_source(originals[rel][0], fs))
+                write(rel, _edit(rel, originals[rel][0], fs))
 
         def restore() -> None:
             for rel, (text, _) in originals.items():
@@ -331,7 +339,7 @@ def prove(root: pathlib.Path, findings: list[Finding], command: str, timeout: in
         # ---- edits that cannot be made on their own lines are not attempted
         for f in list(todo):
             try:
-                edit_source(originals[f.file][0], [f])
+                _edit(f.file, originals[f.file][0], [f])
             except SharedLine as exc:
                 f.proof = f"not provable ({exc})"
                 todo.remove(f)

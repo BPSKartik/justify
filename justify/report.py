@@ -75,18 +75,19 @@ def markdown(res) -> str:
             out += [FENCE, p["batch_output"].strip().replace(FENCE, "'" * 3), FENCE, ""]
     else:
         out = [f"## {NAME}: {len(remove)} unit(s) to remove, {len(simplify)} to simplify", "", whole, ""]
+    au = m.get("audited") or {}
+    by_lang = au.get("lines_by_language") or ({"Python": res.lines} if res.files else {})
+    size = " · ".join(f"{k} {v:,}" for k, v in by_lang.items()) + " lines" if by_lang else \
+        f"{res.files} Python files, {res.lines:,} lines"
     if m["jlr_percent"] is None:
-        out += ["**No Python to audit for dead code.** Justify finds dead code in Python, where it knows the "
-                f"language's rules; every other language is checked for copied blocks ({m['duplicate_lines']} "
-                "duplicate lines found).", ""]
+        out += ["**Nothing here is in a language Justify audits for dead code.** Every language is still checked "
+                f"for copied blocks ({m['duplicate_lines']} duplicate lines found).", ""]
     elif blind:
         out += [f"**Justified Line Ratio:** not measured — {len(unproved)} unit(s), "
-                f"{sum(f.lines for f in unproved)} lines, were found but none could be proved · "
-                f"{res.files} Python files, {res.lines:,} lines", ""]
+                f"{sum(f.lines for f in unproved)} lines, were found but none could be proved · {size}", ""]
     else:
         out += [f"**Justified Line Ratio:** {m['jlr_percent']}% · dead weight: {m['dead_weight_lines']} lines "
-                f"in {m['dead_weight_units']} units ({m['per_1000_lines']} per 1,000 lines) · "
-                f"{res.files} Python files, {res.lines:,} lines", ""]
+                f"in {m['dead_weight_units']} units ({m['per_1000_lines']} per 1,000 lines) · {size}", ""]
     if res.unparsed:
         out += [f"_{len(res.unparsed)} Python file(s) could not be parsed and were not audited: "
                 + ", ".join(f"`{u}`" for u in res.unparsed[:10]) + ("…" if len(res.unparsed) > 10 else "") + "_", ""]

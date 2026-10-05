@@ -323,19 +323,21 @@
 
     // the headline: a ratio when there is Python, and a plain account of what was checked when there is not
     const noPy = m.jlr_percent == null;
+    const audited = ((m.audited || {}).languages || []);
+    const whatLines = audited.length > 1 ? "line Justify audits" : audited.length === 1 ? `${audited[0]} line` : "Python line";
     $("jlr-box").hidden = noPy;
     $("nopy-box").hidden = !noPy;
     if (!noPy) {
       $("jlr").textContent = fmt(m.jlr_percent, 2);
       $("jlr-sub").textContent = m.dead_weight_lines
-        ? `of every Python line justifies itself: ${fmt(m.dead_weight_lines)} lines in ${fmt(m.dead_weight_units)} units have no use anywhere.`
-        : "of every Python line justifies itself: nothing without a use was found.";
+        ? `of every ${whatLines} justifies itself: ${fmt(m.dead_weight_lines)} lines in ${fmt(m.dead_weight_units)} units have no use anywhere.`
+        : `of every ${whatLines} justifies itself: nothing without a use was found.`;
     } else {
       const top = code[0];
       $("nopy-lang").textContent = top ? `${top.name}` : "No source code";
       $("nopy-sub").textContent = top
-        ? `Justify finds dead code in Python, where it knows the language's rules well enough to be sure. ${code.map((l) => l.name).join(", ")} ${code.length === 1 ? "was" : "were"} checked for copied blocks — ${m.duplicate_lines ? `${fmt(m.duplicate_lines)} duplicate lines found` : "none found"}.`
-        : "No file here is in a language Justify reads. It looks for Python, and copies in 25+ other languages.";
+        ? `None of this is in a language Justify audits for dead code yet. ${code.map((l) => l.name).join(", ")} ${code.length === 1 ? "was" : "were"} checked for copied blocks — ${m.duplicate_lines ? `${fmt(m.duplicate_lines)} duplicate lines found` : "none found"}.`
+        : "No file here is in a language Justify reads.";
     }
 
     const ledger = $("ledger");

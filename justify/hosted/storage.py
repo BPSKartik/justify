@@ -61,7 +61,7 @@ class ManagedToken:
             else:
                 out = subprocess.run(["az", "account", "get-access-token", "--resource", self.resource,
                                       "--query", "[accessToken,expires_on]", "-o", "tsv"],
-                                     capture_output=True, text=True, timeout=60)
+                                     capture_output=True, text=True, errors="replace", timeout=60)
                 if out.returncode != 0:
                     raise BlobError(f"no managed identity and no `az login` for {self.resource}")
                 token, expires = (out.stdout.split() + ["0"])[:2]

@@ -180,7 +180,7 @@
           <li data-stage="ingest"><span class="dot"></span><span class="rail-name">Read</span><span class="rail-note">every file</span></li>
           <li data-stage="facts"><span class="dot"></span><span class="rail-name">Map</span><span class="rail-note">who uses what</span></li>
           <li data-stage="candidates"><span class="dot"></span><span class="rail-name">Question</span><span class="rail-note">what needs a reason</span></li>
-          <li data-stage="copies"><span class="dot"></span><span class="rail-name">Compare</span><span class="rail-note">copies, any language</span></li>
+          <li data-stage="copies"><span class="dot"></span><span class="rail-name">Every language</span><span class="rail-note">dead code and copies</span></li>
           <li data-stage="attribution"><span class="dot"></span><span class="rail-name">Attribute</span><span class="rail-note">AI-signed or not</span></li>
           <li data-stage="metrics"><span class="dot"></span><span class="rail-name">Score</span><span class="rail-note">the payoff</span></li>
           <li data-stage="local" class="local"><span class="dot"></span><span class="rail-name">Judge &amp; prove</span><span class="rail-note">on your machine</span></li>
@@ -297,6 +297,11 @@
                 <option value="import">Imports</option>
                 <option value="function">Functions</option>
                 <option value="class">Classes</option>
+                <option value="method">Methods</option>
+                <option value="field">Fields</option>
+                <option value="variable">Variables</option>
+                <option value="type">Types</option>
+                <option value="style">Styles</option>
                 <option value="duplicate">Copies</option>
                 <option value="dependency">Dependencies</option>
               </select>
@@ -544,7 +549,7 @@
         <details><summary>What is the Justified Line Ratio?</summary>
           <p>The share of lines that are not dead weight: lines left after removing everything with no use anywhere, divided by all lines. The dashboard tracks it per repository, over time, split by authorship.</p></details>
         <details><summary>Which languages?</summary>
-          <p>Python gets the full audit: unused imports, functions, classes and dependencies, copies, the jury and proof. More than 25 other languages are checked for copied code and counted, and every repository gets authorship.</p></details>
+          <p>Python, JavaScript, TypeScript (React too), Java, Kotlin, C#, C, C++, Go, Rust, PHP, Swift, CSS, SCSS and HTML get a dead-code audit: unused imports, private functions and members nothing calls, and CSS classes, variables and animations nothing uses. Code another project could call — anything exported or public — is never called dead, only flagged for judgement. More than 25 languages are checked for copied code, and every repository gets authorship.</p></details>
         <details><summary>How is this different from a linter?</summary>
           <p>A linter looks at one file and asks whether a name is used. Justify looks at the whole repository, asks whether the code is <i>worth keeping</i>, explains why with a file and line, proves removals with your tests, and splits the result by who wrote it.</p></details>
       </div>

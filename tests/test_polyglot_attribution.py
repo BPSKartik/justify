@@ -64,7 +64,9 @@ def test_a_copied_block_is_reported_once_at_the_later_place(tmp_path):
     assert [(f.file, f.evidence[0]) for f in found] == [("src/b.js", "src/a.js:2")]
     assert found[0].final == "SIMPLIFY" and found[0].lines >= 6
     langs = {l["name"]: l for l in polyglot.summary(files)}
-    assert langs["JavaScript"]["files"] == 3 and langs["JavaScript"]["audit"] == "copies"
+    from justify import langs as packs
+    assert langs["JavaScript"]["files"] == 3
+    assert langs["JavaScript"]["audit"] == ("full" if packs.AVAILABLE else "copies")
     assert langs["Markdown"]["audit"] == "prose" and note["files"] == 3
 
 
@@ -78,7 +80,10 @@ def test_short_or_trivial_repeats_are_not_copies(tmp_path):
 def test_a_repository_without_python_still_gets_an_audit(tmp_path):
     _write(tmp_path, {"lib/a.ts": BODY, "lib/b.ts": BODY, "notes.md": "hi\n"})
     res = run(tmp_path, record=False)
-    assert res.files == 0 and res.metrics["jlr_percent"] is None
+    from justify import langs as packs
+    # with the language packs, TypeScript is audited too: its shared function is used in the other file
+    assert res.files == 0
+    assert res.metrics["jlr_percent"] == (100.0 if packs.AVAILABLE else None)
     assert res.metrics["duplicate_lines"] > 0
     assert [l["name"] for l in res.languages] == ["TypeScript", "Markdown"]
     assert {r["path"] for r in res.files_detail} == {"lib/a.ts", "lib/b.ts"}
@@ -95,3 +100,27 @@ def test_a_history_of_one_commit_is_called_thin_not_human(tmp_path):
     a = run(tmp_path, record=False).metrics["attribution"]
     assert a["history"]["thin"] and a["history"]["largest_commit_percent"] == 100.0
     assert a["tools"] == {} and a["all_code"] == {"ai_lines": 0, "human_lines": 3}
+
+
+def test_history_that_is_not_utf8_does_not_stop_an_audit(tmp_path):
+    """A commit written in Latin-1 (old projects have them) once crashed `git blame` decoding."""
+    import subprocess
+    env = {"GIT_AUTHOR_NAME": "J\xf6rg", "GIT_AUTHOR_EMAIL": "a@a", "GIT_COMMITTER_NAME": "a", "GIT_COMMITTER_EMAIL": "a@a",
+           "PATH": __import__("os").environ["PATH"]}
+    (tmp_path / "app.py").write_bytes(b"# caf\xe9 \xb0C\nimport json\nprint(1)\n")      # Latin-1 bytes in the file itself
+    for args in (["init", "-q"], ["config", "i18n.commitEncoding", "latin1"], ["add", "-A"],
+                 ["commit", "-qm", "temp \xb0C".encode("latin-1").decode("latin-1")]):
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True, env=env)
+    res = run(tmp_path, record=False)
+    assert any(f.name == "json" for f in res.findings)
+
+
+def test_every_package_is_installed():
+    """A sub-package missing from pyproject's list works from a checkout and breaks every real install
+    (the GitHub Action, the hosted image) — it happened once with justify.langs."""
+    import re
+    root = pathlib.Path(__file__).resolve().parent.parent
+    listed = set(re.findall(r'"(justify(?:\.\w+)*)"', re.search(r"packages = \[([^\]]*)\]",
+                                                               (root / "pyproject.toml").read_text()).group(1)))
+    found = {".".join(p.parent.relative_to(root).parts) for p in (root / "justify").rglob("__init__.py")}
+    assert found <= listed, f"not in pyproject packages: {sorted(found - listed)}"

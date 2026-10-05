@@ -353,7 +353,7 @@ class Jobs:
                 pass
 
         with open(out_path, "w") as out:
-            p = subprocess.Popen(self.scan_argv(repo_dir), stdout=out, stderr=subprocess.PIPE, text=True, env=env,
+            p = subprocess.Popen(self.scan_argv(repo_dir), stdout=out, stderr=subprocess.PIPE, text=True, errors="replace", env=env,
                                  start_new_session=True, preexec_fn=limits if sys.platform.startswith("linux") else None)
             reader = threading.Thread(target=self._read_progress, args=(job_id, p.stderr), daemon=True)
             reader.start()

@@ -106,7 +106,7 @@ def _patterns() -> list[re.Pattern]:
 
 def _git(root: pathlib.Path, *args: str) -> str | None:
     try:
-        r = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, timeout=120)
+        r = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, errors="replace", timeout=120)
     except (OSError, subprocess.TimeoutExpired):
         return None
     return r.stdout if r.returncode == 0 else None

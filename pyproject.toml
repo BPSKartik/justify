@@ -23,7 +23,9 @@ Repository = "https://github.com/BPSKartik/justify"
 
 [project.optional-dependencies]
 mcp = ["mcp>=2,<3"]
-hosted = ["mcp>=2,<3", "uvicorn>=0.30", "starlette>=0.37", "cryptography>=42"]
+languages = ["tree-sitter>=0.23", "tree-sitter-language-pack>=0.7"]
+hosted = ["mcp>=2,<3", "uvicorn>=0.30", "starlette>=0.37", "cryptography>=42", "tree-sitter>=0.23",
+          "tree-sitter-language-pack>=0.7"]
 dev = ["pytest>=8", "httpx"]
 
 [project.scripts]
@@ -31,7 +33,7 @@ justify = "justify.cli:main"
 justify-mcp = "justify.mcp_server:main"
 
 [tool.setuptools]
-packages = ["justify", "justify.hosted"]
+packages = ["justify", "justify.hosted", "justify.langs"]
 
 [tool.setuptools.package-data]
 "justify.hosted" = ["static/*"]

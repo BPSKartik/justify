@@ -22,6 +22,10 @@ def _print_summary(res) -> None:
         print("  Made of   " + ", ".join(f"{l['name']} {l['lines']:,}" for l in res.languages[:6]) + " lines")
     print(f"  Stage 1  {res.files} Python files, {res.lines:,} lines, each hashed"
           + (f" ({len(res.unparsed)} could not be parsed)" if res.unparsed else ""))
+    au = m.get("audited") or {}
+    others = {k: v for k, v in (au.get("lines_by_language") or {}).items() if k != "Python"}
+    if others:
+        print("  Also     " + ", ".join(f"{k} {v:,}" for k, v in others.items()) + " lines audited for dead code")
     print("  Stage 2  syntax trees parsed; imports, definitions and references collected")
     counts = {}
     for f in res.findings:
@@ -67,10 +71,12 @@ def _print_summary(res) -> None:
             print(f"  {'KEEP':<8} {f.kind:<10} {loc:<34} {f.name:<22} proof: {f.proof[:64]}")
     print()
     if m["jlr_percent"] is None:
-        print("  Justified Line Ratio  n/a — no Python to audit for dead code; other languages checked for copies")
+        print("  Justified Line Ratio  n/a — nothing here in a language Justify audits; copies checked")
     else:
         print(f"  Justified Line Ratio  {m['jlr_percent']}%   ·   dead weight {m['dead_weight_lines']} lines "
               f"({m['per_1000_lines']} per 1,000)   ·   duplicate lines {m['duplicate_lines']}")
+        if others and m.get("python_jlr_percent") is not None:
+            print(f"  Python alone          {m['python_jlr_percent']}%")
     a = m.get("attribution")
     if a:
         code = a.get("all_code") or {"ai_lines": a["ai_lines"], "human_lines": a["human_lines"]}

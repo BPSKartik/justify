@@ -238,7 +238,7 @@ class EntraToken:
         if not az:
             raise ModelError("foundry: the Azure CLI (az) is not installed — sign in with `az login`")
         r = subprocess.run([az, "account", "get-access-token", "--resource", self.resource, "-o", "json"],
-                           capture_output=True, text=True, timeout=60)
+                           capture_output=True, text=True, errors="replace", timeout=60)
         if r.returncode != 0:
             raise ModelError("foundry: no Azure sign-in — run `az login`, then try again")
         d = json.loads(r.stdout)
@@ -281,7 +281,7 @@ class ClaudeCli(Model):
         else:
             cmd = [self.binary, "-p", f"{system}\n\n{prompt}", "--output-format", "json", "--model", self.model]
         try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=self.timeout, cwd=tempfile.gettempdir())
+            r = subprocess.run(cmd, capture_output=True, text=True, errors="replace", timeout=self.timeout, cwd=tempfile.gettempdir())
             if self.isolated and r.returncode != 0 and "unknown option" in (r.stderr or "").lower():
                 self.isolated = False
                 return self.ask(system, user)
